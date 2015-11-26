@@ -73,13 +73,6 @@ nombrecompleto.distinct().coalesce(1,true).saveAsTextFile("/Users/juandavid/Docu
 val countNombre = nombrecompleto.countByValue()
 
 
-//encontrar mean
-val mean = countNombre.values.sum/countNombre.size
-
-//encontrar desviacion standar y varianza
-val variance = countNombre.values.map(x=> (x - mean) * (x - mean))
-val stddev = Math.sqrt(variance.sum.toDouble / countNombre.size.toDouble)
-
 //Se pasa a una secuencia para luego ordernar
 val countNombreSeq = countNombre.toSeq
 //imprime los 20 primeros autores
@@ -89,17 +82,30 @@ countNombreSeq.sortBy(_._2).reverse.take(20).foreach(println)
 val valueDist = countNombre.groupBy(_._2).mapValues(_.size)
 valueDist.toSeq.sorted.take(10).foreach(println)
 
+//encontrar mean
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.stat.{MultivariateStatisticalSummary, Statistics}
+
+val dataforstats = sc.parallelize(valueDist.values.map(x=> Vectors.dense(x.toDouble)).toSeq)
+val summary: MultivariateStatisticalSummary = Statistics.colStats(dataforstats)
+// a dense vector containing the mean value for each column
+summary.mean 
+// como se puede ver no es poisson porque los valores 
+//son muy distintos
+summary.variance 
+
 //importar para hacer plot y kernel density
 import org.apache.spark.mllib.stat.KernelDensity
 import org.apache.spark.rdd.RDD
 
 //function that creates kernel density
-def plotDistribution(samples: Array[Double]) {
-    val min = samples.min
-    val max = samples.max
+def plotDistributionKernel(samples: Map[Long,Int]) {
+    val min = samples.values.map(x=>x.toDouble).min
+    val max = samples.values.map(x=>x.toDouble).max
     val domain = Range.Double(min, max, (max - min) / 100).
     toList.toArray
-    val densities = KernelDensity.estimate(samples, domain)
+    val values = samples.values.map(x=>x.toDouble).toArray
+    val densities = KernelDensity.estimate(values, domain)
     val f = Figure()
     val p = f.subplot(0)
     p += plot(domain, densities)
@@ -108,9 +114,73 @@ def plotDistribution(samples: Array[Double]) {
 }
 
 //plot
-plotDistribution(valueDist.values.map(x=>x.toDouble).toSeq.sorted.toArray)
+plotDistributionKernel(valueDist)
+
+//function that plot density
+def plotDistribution(samples: Map[Long,Int]) {
+    val min = samples.values.map(x=>x.toDouble).min
+    val max = samples.values.map(x=>x.toDouble).max
+    
+    val domain = samples.toArray.sortBy(_._1).map(x=>x._1.toDouble)
+    val values = samples.toArray.sortBy(_._1).map(x=> (x._2.toDouble - min)/(max - min)  )
+    val f = Figure()
+    val p = f.subplot(0)
+    p += plot(domain,values)
+    p.title = "data standarize"
+}
+
+//fit a distribution to valueDist
+//como se puede observar en el plot anterior 
+//puede ser una poisson o chi square
+
+//miramos se es poisson en R
+/****CODIGO EN RSTUDIO, copiar valueDist.value (ctrl + c) y pegar en rstudio
+//Le falta un poco para que poisson sea pero es bastante cerca
+library(fitdistrplus)
+library(logspline)
+
+data <-  c(1218, 159, 11, 3, 14, 1, 53, 22, 6, 576550, 1,
+     718, 6, 2, 15, 7, 1, 219, 72, 2, 1, 22889, 8,
+     5, 34, 19, 2, 1, 8, 1, 93, 1, 458, 5627, 6,
+     1, 1, 27, 1, 1, 31, 3, 123, 7, 8, 1, 7,
+     290, 1, 5, 9, 1, 21, 2255, 3, 51)
+
+descdist(data, discrete = TRUE)
 
 
+fit.logistic <- fitdist(data, "pois")
+plot(fit.logistic)
+
+******/
+
+//mirar si es poisson en Spark
+
+//vamos a generar poisson datos random
+import org.apache.spark.mllib.random.RandomRDDs._
+
+val datosPoisson = Vectors.dense(poissonRDD(sc, mean, count, seed=1L).toArray)
+val vectdatos = Vectors.dense(valueDist.values.map(x=>x.toDouble).toArray)
+
+val goodnessOfFitTestResult = Statistics.chiSqTest(vectdatos,datosPoisson)
+/*
+goodnessOfFitTestResult: org.apache.spark.mllib.stat.test.ChiSqTestResult = 
+Chi squared test summary:
+method: pearson
+degrees of freedom = 55 
+statistic = 2.9590445395674776E7 
+pValue = 0.0 
+Very strong presumption against null hypothesis: observed follows the same distribution as expected..
+*/
+
+val testResult = Statistics.kolmogorovSmirnovTest(sc.parallelize(valueDist.values.map(x=>x.toDouble).toSeq),
+    "norm", 10912, 5.93)
+/*
+Kolmogorov-Smirnov test summary:
+degrees of freedom = 0 
+statistic = 0.9642857142857143 
+pValue = 0.0 
+Very strong presumption against null hypothesis: Sample follows theoretical distribution.
+*/
 
 
 
