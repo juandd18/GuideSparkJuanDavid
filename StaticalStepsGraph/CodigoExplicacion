@@ -9,13 +9,20 @@ $ mvn package
 //ejecutamos en la lineas de commandos
 //mirar que se encuentra el jar en target y que este en 
 //la carpeta de spark
-$ spark-shell --jars target/common-1.0.0.jar
+$ spark-shell --jars target/common-1.0.0.jar,
+target/breeze-viz_2.10-0.9.jar, 
+target/breeze_2.10-0.9.jar, 
+target/jcommon-1.0.16.jar, 
+target/jfreechart-1.0.13.jar 
 
 
 import com.cloudera.datascience.common.XmlInputFormat
 import org.apache.spark.SparkContext
 import org.apache.hadoop.io.{Text, LongWritable}
 import org.apache.hadoop.conf.Configuration
+import org.jfree.chart.axis.ValueAxis 
+import breeze.linalg._ 
+import breeze.plot._ 
 
 //genera metodo que lee el o los archivos xml
 //linea:  in.map(line => line._2.toString) es line._2 porque line._1 es un id unico
@@ -31,7 +38,7 @@ def loadMedline(sc: SparkContext, path: String) = {
 
 import scala.xml._
 //cargar los datos
-val registroRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
+val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
 
 //convierte cada elemento en un Elem de scala.xml(XML)
 val registrosTodos = registrosRaw.map(XML.loadString)
@@ -49,6 +56,7 @@ val apellido  = registrosTodos.map(x => (x \\ "LastName").map(x=>x.text)).flatMa
 map(x=> (x._2,x._1.toLowerCase.capitalize))
 //se utiliza zipWithIndex para poder hacer el join
 val nombrecompleto = nombre.join(apellido).map(x=> x._2)
+nombrecompleto.cache()
 
 //mostar nombre unicos
 nombrecompleto.distinct().count()
@@ -63,6 +71,7 @@ nombrecompleto.distinct().coalesce(1,true).saveAsTextFile("/Users/juandavid/Docu
 //en este case significa cuantas veces un autor aparece 
 //en varios documentos
 val countNombre = nombrecompleto.countByValue()
+
 
 //encontrar mean
 val mean = countNombre.values.sum/countNombre.size
@@ -80,8 +89,26 @@ countNombreSeq.sortBy(_._2).reverse.take(20).foreach(println)
 val valueDist = countNombre.groupBy(_._2).mapValues(_.size)
 valueDist.toSeq.sorted.take(10).foreach(println)
 
+//importar para hacer plot y kernel density
+import org.apache.spark.mllib.stat.KernelDensity
+import org.apache.spark.rdd.RDD
 
+//function that creates kernel density
+def plotDistribution(samples: Array[Double]) {
+    val min = samples.min
+    val max = samples.max
+    val domain = Range.Double(min, max, (max - min) / 100).
+    toList.toArray
+    val densities = KernelDensity.estimate(samples, domain)
+    val f = Figure()
+    val p = f.subplot(0)
+    p += plot(domain, densities)
+    p.xlabel = "data"
+    p.ylabel ="y"
+}
 
+//plot
+plotDistribution(valueDist.values.map(x=>x.toDouble).toSeq.sorted.toArray)
 
 
 
