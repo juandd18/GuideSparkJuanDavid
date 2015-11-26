@@ -10,3 +10,47 @@ $ mvn package
 //mirar que se encuentra el jar en target y que este en 
 //la carpeta de spark
 $ spark-shell --jars target/common-1.0.0.jar
+
+
+import com.cloudera.datascience.common.XmlInputFormat
+import org.apache.spark.SparkContext
+import org.apache.hadoop.io.{Text, LongWritable}
+import org.apache.hadoop.conf.Configuration
+
+//genera metodo que lee el o los archivos xml
+//linea:  in.map(line => line._2.toString) es line._2 porque line._1 es un id unico
+def loadMedline(sc: SparkContext, path: String) = {
+    val conf = new Configuration()
+    conf.set(XmlInputFormat.START_TAG_KEY, "<MedlineCitation ")
+    conf.set(XmlInputFormat.END_TAG_KEY, "</MedlineCitation>")
+    val in = sc.newAPIHadoopFile(path, classOf[XmlInputFormat],
+    classOf[LongWritable], classOf[Text], conf)
+    in.map(line => line._2.toString) 
+}
+
+/*
+The \ operator only works on direct children of the node; if we execute elem \ "Mesh
+Heading", the result is an empty NodeSeq. To extract nondirect children of a given
+node, we need to use the \\ operator:
+*/
+
+// este comando (x \\ "ForeName") busca dentro cada subelemto not direct children "Elem (xml object)"
+val nombre  = registrosTodos.map(x => (x \\ "ForeName").map(x=>x.text)).flatMap(x=>x).zipWithIndex.
+map(x=> (x._2,x._1.toUpperCase.capitalize))
+val apellido  = registrosTodos.map(x => (x \\ "LastName").map(x=>x.text)).flatMap(x=>x).zipWithIndex.
+map(x=> (x._2,x._1.toLowerCase.capitalize))
+//se utiliza zipWithIndex para poder hacer el join
+val nombrecompleto = nombre.join(apellido).map(x=> x._2)
+
+//mostar nombre unicos
+nombrecompleto.distinct().count()
+
+//mostar NO nombre unicos
+nombrecompleto.count()
+
+
+
+
+
+
+
