@@ -1,0 +1,12 @@
+
+##Line de comandos
+//solo ejecutar si usted no tiene common-1.0.0.jar
+//este jar posee la clase en java XmlInputFormat, se utilizar para
+//leer xml files
+$ cd common/
+$ mvn package
+
+//ejecutamos en la lineas de commandos
+//mirar que se encuentra el jar en target y que este en 
+//la carpeta de spark
+$ spark-shell --jars target/common-1.0.0.jar
