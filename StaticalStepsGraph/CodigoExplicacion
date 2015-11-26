@@ -28,6 +28,14 @@ def loadMedline(sc: SparkContext, path: String) = {
     in.map(line => line._2.toString) 
 }
 
+
+import scala.xml._
+//cargar los datos
+val registroRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
+
+//convierte cada elemento en un Elem de scala.xml(XML)
+val registrosTodos = registrosRaw.map(XML.loadString)
+
 /*
 The \ operator only works on direct children of the node; if we execute elem \ "Mesh
 Heading", the result is an empty NodeSeq. To extract nondirect children of a given
@@ -47,6 +55,32 @@ nombrecompleto.distinct().count()
 
 //mostar NO nombre unicos
 nombrecompleto.count()
+
+//guardar archivo de nombre unicos. coalesce trae solo un formato se ejecuta en un worker no mas
+nombrecompleto.distinct().coalesce(1,true).saveAsTextFile("/Users/juandavid/Documents/medline_data/nombresMedline")
+
+//countByValue genera cuantas veces se repite un nombre 
+//en este case significa cuantas veces un autor aparece 
+//en varios documentos
+val countNombre = nombrecompleto.countByValue()
+
+//encontrar mean
+val mean = countNombre.values.sum/countNombre.size
+
+//encontrar desviacion standar y varianza
+val variance = countNombre.values.map(x=> (x - mean) * (x - mean))
+val stddev = Math.sqrt(variance.sum.toDouble / countNombre.size.toDouble)
+
+//Se pasa a una secuencia para luego ordernar
+val countNombreSeq = countNombre.toSeq
+//imprime los 20 primeros autores
+countNombreSeq.sortBy(_._2).reverse.take(20).foreach(println)
+
+//se crea histograma o distribucion 
+val valueDist = countNombre.groupBy(_._2).mapValues(_.size)
+valueDist.toSeq.sorted.take(10).foreach(println)
+
+
 
 
 
