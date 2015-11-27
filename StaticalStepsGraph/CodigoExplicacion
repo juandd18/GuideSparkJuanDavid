@@ -51,7 +51,7 @@ node, we need to use the \\ operator:
 
 // este comando (x \\ "ForeName") busca dentro cada subelemto not direct children "Elem (xml object)"
 val nombre  = registrosTodos.map(x => (x \\ "ForeName").map(x=>x.text)).flatMap(x=>x).zipWithIndex.
-map(x=> (x._2,x._1.toUpperCase.capitalize))
+map(x=> (x._2,x._1.toLowerCase.capitalize))
 val apellido  = registrosTodos.map(x => (x \\ "LastName").map(x=>x.text)).flatMap(x=>x).zipWithIndex.
 map(x=> (x._2,x._1.toLowerCase.capitalize))
 //se utiliza zipWithIndex para poder hacer el join
@@ -72,6 +72,18 @@ nombrecompleto.distinct().coalesce(1,true).saveAsTextFile("/Users/juandavid/Docu
 //en varios documentos
 val countNombre = nombrecompleto.countByValue()
 
+//encontrar mean
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.stat.{MultivariateStatisticalSummary, Statistics}
+
+val dataforstats = sc.parallelize(countNombre.values.map(x=> Vectors.dense(x.toDouble)).toSeq)
+val summary: MultivariateStatisticalSummary = Statistics.colStats(dataforstats)
+// a dense vector containing the mean value for each column
+summary.mean 
+// como se puede ver no es poisson porque los valores 
+//son muy distintos
+summary.variance 
+
 
 //Se pasa a una secuencia para luego ordernar
 val countNombreSeq = countNombre.toSeq
@@ -82,17 +94,6 @@ countNombreSeq.sortBy(_._2).reverse.take(20).foreach(println)
 val valueDist = countNombre.groupBy(_._2).mapValues(_.size)
 valueDist.toSeq.sorted.take(10).foreach(println)
 
-//encontrar mean
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
-import org.apache.spark.mllib.stat.{MultivariateStatisticalSummary, Statistics}
-
-val dataforstats = sc.parallelize(valueDist.values.map(x=> Vectors.dense(x.toDouble)).toSeq)
-val summary: MultivariateStatisticalSummary = Statistics.colStats(dataforstats)
-// a dense vector containing the mean value for each column
-summary.mean 
-// como se puede ver no es poisson porque los valores 
-//son muy distintos
-summary.variance 
 
 //importar para hacer plot y kernel density
 import org.apache.spark.mllib.stat.KernelDensity
@@ -116,8 +117,20 @@ def plotDistributionKernel(samples: Map[Long,Int]) {
 //plot
 plotDistributionKernel(valueDist)
 
-//function that plot density
 def plotDistribution(samples: Map[Long,Int]) {
+    val min = samples.values.map(x=>x.toDouble).min
+    val max = samples.values.map(x=>x.toDouble).max
+    
+    val domain = samples.toArray.sortBy(_._1).map(x=>x._1.toDouble)
+    val values = samples.toArray.sortBy(_._1).map(x=> (x._2.toDouble))
+    val f = Figure()
+    val p = f.subplot(0)
+    p += plot(domain,values, '.')
+    p.title = "data"
+}
+
+//function that plot density
+def plotDistributionStd(samples: Map[Long,Int]) {
     val min = samples.values.map(x=>x.toDouble).min
     val max = samples.values.map(x=>x.toDouble).max
     
@@ -125,7 +138,7 @@ def plotDistribution(samples: Map[Long,Int]) {
     val values = samples.toArray.sortBy(_._1).map(x=> (x._2.toDouble - min)/(max - min)  )
     val f = Figure()
     val p = f.subplot(0)
-    p += plot(domain,values)
+    p += plot(domain,values, '.')
     p.title = "data standarize"
 }
 
@@ -158,29 +171,44 @@ plot(fit.logistic)
 //vamos a generar poisson datos random
 import org.apache.spark.mllib.random.RandomRDDs._
 
-val datosPoisson = Vectors.dense(poissonRDD(sc, mean, count, seed=1L).toArray)
-val vectdatos = Vectors.dense(valueDist.values.map(x=>x.toDouble).toArray)
+//the 10912.14 viene de summary.mean y 611080 countNombre.size
+val datosPoisson = Vectors.dense(poissonRDD(sc, 1.11, 611080, seed=1L).toArray)
+val vectdatos = Vectors.dense(countNombre.values.map(x=>x.toDouble).toArray)
 
+//chiSqTest(observed: Vector, expected: Vector)
 val goodnessOfFitTestResult = Statistics.chiSqTest(vectdatos,datosPoisson)
-/*
+/* Null Hyphotesis : observed follows the same distribution as expected, p-value < 0.05 reject null hypothesis
+//pero no indica que tipo de asociacion
+ChiSqTest: Chi-squared approximation may not be accurate due to low expected frequencies  as a result of a large number of categories: 611080.
 goodnessOfFitTestResult: org.apache.spark.mllib.stat.test.ChiSqTestResult = 
 Chi squared test summary:
 method: pearson
-degrees of freedom = 55 
-statistic = 2.9590445395674776E7 
+degrees of freedom = 611079 
+statistic = Infinity 
 pValue = 0.0 
 Very strong presumption against null hypothesis: observed follows the same distribution as expected..
 */
 
-val testResult = Statistics.kolmogorovSmirnovTest(sc.parallelize(valueDist.values.map(x=>x.toDouble).toSeq),
-    "norm", 10912, 5.93)
-/*
+val testResult = Statistics.kolmogorovSmirnovTest(sc.parallelize(countNombre.values.map(x=>x.toDouble).toSeq),
+    "norm", 1.15, 5.93)
+/* Null Hypothesis: the sample is drawn for that distribution, p-value < 0.05 reject null hypothesis
 Kolmogorov-Smirnov test summary:
 degrees of freedom = 0 
-statistic = 0.9642857142857143 
-pValue = 0.0 
+statistic = 0.48990978732440305 
+pValue = 1.9159279718294897E-9 
 Very strong presumption against null hypothesis: Sample follows theoretical distribution.
 */
+
+//LOS DATOS NO SON POISSON NO NORMAL COMO LO COMPRUEBA R (graficos) y los hypothesis testing
+//Tenemos que hacer MCMC 
+
+//hallar conjugate prior of poisson
+
+
+
+
+
+
 
 
 
