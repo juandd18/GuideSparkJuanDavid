@@ -204,7 +204,10 @@ Very strong presumption against null hypothesis: Sample follows theoretical dist
 //Vamos a mostrar cuales pares de doctores escriben mas seguido
 
 val doctorPairs = nombrecompleto.distinct()
-val doctorPariCart = doctorPairs.cartesian(doctorPairs)
+//hay muchos doctores mi computador no logra computar
+//todas las combinaciones 20%
+val sampledoctor =  doctorPairs.sample(false, 0.01)
+val doctorPariCart = sampledoctor.cartesian(doctorPairs)
 
 val doctorPairsmap = doctorPariCart.map(p=>(p,1))
 val cooccurs = doctorPairsmap.reduceByKey(_+_)
