@@ -1,4 +1,8 @@
 
+/* Para ejecutar spark en order los jars
+/Users/juandavid/Documents/spark-1.5.1-bin-hadoop2.6/bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,
+breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,guava-18.0.jar
+*/
 ##Line de comandos
 //solo ejecutar si usted no tiene common-1.0.0.jar
 //este jar posee la clase en java XmlInputFormat, se utilizar para
@@ -38,7 +42,8 @@ def loadMedline(sc: SparkContext, path: String) = {
 
 import scala.xml._
 //cargar los datos
-val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
+val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/medsamp2015a.xml")
+//val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
 
 //convierte cada elemento en un Elem de scala.xml(XML)
 val registrosTodos = registrosRaw.map(XML.loadString)
@@ -203,14 +208,16 @@ Very strong presumption against null hypothesis: Sample follows theoretical dist
 //Continuamos
 //Vamos a mostrar cuales pares de doctores escriben mas seguido
 
+import  org.apache.spark.storage.StorageLevel
+
 val doctorPairs = nombrecompleto.distinct()
-//hay muchos doctores mi computador no logra computar
-//todas las combinaciones 20%
-val sampledoctor =  doctorPairs.sample(false, 0.01)
-val doctorPariCart = sampledoctor.cartesian(doctorPairs)
+//el filter permite crear COMBINACIONES ( RDD of size rdd.size() choose 2)
+val doctorPariCart = doctorPairs.cartesian(doctorPairs).filter{ case (a,b) => a < b }
 
 val doctorPairsmap = doctorPariCart.map(p=>(p,1))
-val cooccurs = doctorPairsmap.reduceByKey(_+_)
+val cooccurs = doctorPairsmap.reduceByKey(_+_, numPartitions = 2).persist(StorageLevel.DISK_ONLY)
+cooccurs.take(2)
+
 val cooccursSorted = cooccurs.sortBy(_._2)
 cooccursSorted.take(10)
 
