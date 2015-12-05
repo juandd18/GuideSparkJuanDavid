@@ -1,7 +1,6 @@
 
 /* Para ejecutar spark en order los jars
-/Users/juandavid/Documents/spark-1.5.1-bin-hadoop2.6/bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,
-breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,guava-18.0.jar
+/Users/juandavid/Documents/spark-1.5.1-bin-hadoop2.6/bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,guava-18.0.jar
 */
 ##Line de comandos
 //solo ejecutar si usted no tiene common-1.0.0.jar
@@ -21,12 +20,24 @@ target/jfreechart-1.0.13.jar
 target/guava-18.0.jar
 
 import com.cloudera.datascience.common.XmlInputFormat
+
 import org.apache.spark.SparkContext
 import org.apache.hadoop.io.{Text, LongWritable}
+import org.apache.spark.rdd.RDD
+
+import org.apache.hadoop.mapreduce.InputSplit;
+import org.apache.hadoop.mapreduce.RecordReader;
+import org.apache.hadoop.mapreduce.TaskAttemptContext;
+import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+import org.apache.hadoop.mapred.TextInputFormat
+
 import org.apache.hadoop.conf.Configuration
 import org.jfree.chart.axis.ValueAxis 
 import breeze.linalg._ 
 import breeze.plot._ 
+
+val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+import sqlContext.implicits._
 
 //genera metodo que lee el o los archivos xml
 //linea:  in.map(line => line._2.toString) es line._2 porque line._1 es un id unico
@@ -40,13 +51,32 @@ def loadMedline(sc: SparkContext, path: String) = {
 }
 
 
-import scala.xml._
-//cargar los datos
-val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/medsamp2015a.xml")
+
+//val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/medsamp2015a.xml")
+
+val conf = new Configuration()
+conf.set("xmlinput.start", "<MedlineCitation ")
+conf.set("xmlinput.end", "</MedlineCitation>")
+
+//val path = "hdfs://ec2-54-90-6-104.compute-1.amazonaws.com:9000/medsamp2015a.xml"
+val path = "/Users/juandavid/Documents/medline_data/medsamp2015a.xml"
+val in = sc.hadoopFile(path,classOf[TextInputFormat],classOf[LongWritable], classOf[Text], 1)
+val registrosRaw = in.map(line => line._2.toString) 
+
+//error
+/*
+
+java.lang.IncompatibleClassChangeError: Found class org.apache.hadoop.mapreduce.TaskAttemptContext, but interface was expected
+
+*/
+
+val registrosRaw = loadMedline(sc,path)
 //val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
 
+import scala.xml._
+//cargar los datos
 //convierte cada elemento en un Elem de scala.xml(XML)
-val registrosTodos = registrosRaw.map(XML.loadString)
+val registrosTodos: RDD[Elem]  = registrosRaw.map(XML.loadString)
 
 /*
 The \ operator only works on direct children of the node; if we execute elem \ "Mesh
