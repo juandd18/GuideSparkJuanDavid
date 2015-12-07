@@ -1,6 +1,11 @@
+/*CREAR CLUSTER EN ec2
+./spark-ec2 --key-pair=ClouderaEc2 --identity-file=/Users/juandavid/Documents/awsSet/ClouderaEc2.pem --region=us-east-1 --instance-type=m3.large -s 1 --copy-aws-credentials --hadoop-major-version=2 launch juan-cluster
+*/
+
 
 /* Para ejecutar spark en order los jars
 /Users/juandavid/Documents/spark-1.5.1-bin-hadoop2.6/bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,guava-18.0.jar
+bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,
 */
 ##Line de comandos
 //solo ejecutar si usted no tiene common-1.0.0.jar
@@ -20,6 +25,8 @@ target/jfreechart-1.0.13.jar
 target/guava-18.0.jar
 
 import com.cloudera.datascience.common.XmlInputFormat
+
+import lectura.juanDos.XmlInputFormat
 
 import org.apache.spark.SparkContext
 import org.apache.hadoop.io.{Text, LongWritable}
@@ -54,21 +61,8 @@ def loadMedline(sc: SparkContext, path: String) = {
 
 //val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/medsamp2015a.xml")
 
-val conf = new Configuration()
-conf.set("xmlinput.start", "<MedlineCitation ")
-conf.set("xmlinput.end", "</MedlineCitation>")
+//val path = "hdfs://ec2-54-237-83-252.compute-1.amazonaws.com:9000/medsamp2015a.xml"
 
-//val path = "hdfs://ec2-54-90-6-104.compute-1.amazonaws.com:9000/medsamp2015a.xml"
-val path = "/Users/juandavid/Documents/medline_data/medsamp2015a.xml"
-val in = sc.hadoopFile(path,classOf[TextInputFormat],classOf[LongWritable], classOf[Text], 1)
-val registrosRaw = in.map(line => line._2.toString) 
-
-//error
-/*
-
-java.lang.IncompatibleClassChangeError: Found class org.apache.hadoop.mapreduce.TaskAttemptContext, but interface was expected
-
-*/
 
 val registrosRaw = loadMedline(sc,path)
 //val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
@@ -84,13 +78,12 @@ Heading", the result is an empty NodeSeq. To extract nondirect children of a giv
 node, we need to use the \\ operator:
 */
 
-// este comando (x \\ "ForeName") busca dentro cada subelemto not direct children "Elem (xml object)"
-val nombre  = registrosTodos.map(x => (x \\ "ForeName").map(x=>x.text)).flatMap(x=>x).zipWithIndex.
-map(x=> (x._2,x._1.toLowerCase.capitalize))
-val apellido  = registrosTodos.map(x => (x \\ "LastName").map(x=>x.text)).flatMap(x=>x).zipWithIndex.
-map(x=> (x._2,x._1.toLowerCase.capitalize))
-//se utiliza zipWithIndex para poder hacer el join
-val nombrecompleto = nombre.join(apellido).map(x=> (x._2._1 + " "+ x._2._2) )
+//FALTA ARREGLAR CAPITALIZACION
+val nombre  = registrosTodos.map(x => ((x \\ "ForeName").map(x=>x.text) zip (x \\ "LastName").map(x=>x.text))  )
+val nombreListado = nombre.map(x=> x.map(x => x._1.toLowerCase.capitalize + " " +x._2.toLowerCase.capitalize ) )
+val nombrecompleto = nombreListado.flatMap(x=>x)
+
+
 nombrecompleto.cache()
 
 //mostar nombre unicos
@@ -238,18 +231,16 @@ Very strong presumption against null hypothesis: Sample follows theoretical dist
 //Continuamos
 //Vamos a mostrar cuales pares de doctores escriben mas seguido
 
-import  org.apache.spark.storage.StorageLevel
+val nombrePairs = nombreListado.flatMap(t => t.sorted.combinations(2))
+val cooccurs = nombrePairs.map(p => (p, 1)).reduceByKey(_+_)
+cooccurs.cache()
+cooccurs.count()
 
-val doctorPairs = nombrecompleto.distinct()
-//el filter permite crear COMBINACIONES ( RDD of size rdd.size() choose 2)
-val doctorPariCart = doctorPairs.cartesian(doctorPairs).filter{ case (a,b) => a < b }
-
-val doctorPairsmap = doctorPariCart.map(p=>(p,1))
-val cooccurs = doctorPairsmap.reduceByKey(_+_, numPartitions = 2).persist(StorageLevel.DISK_ONLY)
-cooccurs.take(2)
-
-val cooccursSorted = cooccurs.sortBy(_._2)
+//ordena descendentemente por la segunda columna
+val cooccursSorted = cooccurs.sortBy(_._2,false)
 cooccursSorted.take(10)
+
+
 
 //Vamos a crear Graph de medline (co ocurrencias)
 
@@ -271,7 +262,9 @@ def hashId(str: String): Long = {
     ((bytes(7) & 0xFFL) << 56)
   }
 
-val vertices = nombrecompleto.distinct().map(nombre => (hashId(nombre), nombre))
+val nombrevertices = nombrecompleto.distinct().cache()
+
+val vertices = nombrevertices.map(nombre => (hashId(nombre), nombre))
 
 //verificar que los hash values son unicos
 val uniqueHashes = vertices.map(_._1).countByValue()
@@ -288,7 +281,82 @@ val edges = cooccurs.map(p => {
     Edge(ids(0), ids(1), cnt)
 })
 
+//crear graph
+val doctorGraph = Graph(vertices, edges)
+doctorGraph.cache()
 
+//Connected Components
+val connectedComponentGraph: Graph[VertexId, Int] = doctorGraph.connectedComponents()
+
+/*get a count of the number of connected components and their size, we can use the
+trusty countByValue method against the VertexId values for each vertex in the Ver
+texRDD. We’ll write a function to find a list of all the connected components, sorted by
+their sizes
+*/
+def sortedConnectedComponents(connectedComponents: Graph[VertexId, _]) : Seq[(VertexId, Long)] = {
+val componentCounts = connectedComponents.vertices.map(_._2).
+countByValue
+componentCounts.toSeq.sortBy(_._2).reverse
+}
+
+//how many components there are 
+val componentCounts = sortedConnectedComponents(connectedComponentGraph)
+componentCounts.size
+
+//show the 10 bigest components
+componentCounts.take(10).foreach(println)
+
+//find the names of the doctors for each component by a inner join 
+//with the doctorGraph and connectedComponents
+val doctornameCID = doctorGraph.vertices.innerJoin(connectedComponentGraph.vertices) {
+(doctorId, name, componentId) => (name, componentId)
+}
+
+//show names of doctor which are not in the largest component 
+//componentCounts(1)._1 is the second largest component
+val c1 = doctornameCID.filter(x => x._2._2 == componentCounts(1)._1)
+c1.take(5).foreach(x => println(x._2._1))
+
+//how many times R Joyeuse writes a document
+val R_Joyeuse = nombrecompleto.filter(_.contains("R Joyeuse")).countByValue()
+R_Joyeuse.take(1)
+
+//DEGREES
+val degrees: VertexRDD[Int] = doctorGraph.degrees.cache()
+
+//show degree stats
+//Estos datos nos muestran que hay mas vertices que degrees es decir
+//hay edges o doctores que escribieron articulos solos
+degrees.map(_._2).stats()
+//(count: 21341, mean: 2,266342, stdev: 1,846737, max: 26,000000, min: 1,000000)
+
+doctorGraph.vertices.count()
+//res57: Long = 33050
+
+//vamos a encontrar cuantos doctores escribieron alguna vez un
+//articulo solos en este case existen 14281 doctores
+val sing = nombreListado.filter(x => x.size == 1)
+val singDoctor = sing.flatMap(doctor => doctor).distinct()
+singDoctor.count()
+//res58: Long = 14281
+
+//ahora vamos a encontrar los doctores que solo 
+//han escritos solos (11709)
+val topic2 = nombrePairs.flatMap(p => p)
+singDoctor.subtract(topic2).count()
+//res60: Long = 11709
+
+//get the names of the top degree vertices
+def topNamesAndDegrees(degrees: VertexRDD[Int],doctorGraph: Graph[String, Int]): Array[(String, Int)] = {
+val namesAndDegrees = degrees.innerJoin(doctorGraph.vertices) {
+(topicId, degree, name) => (name, degree)
+}
+namesAndDegrees.map(_._2).sortBy(_._2,false).take(10)
+
+}
+
+topNamesAndDegrees(degrees, doctorGraph).foreach(println)
+//(A v Hardy,26) (D Philippides,22)....
 
 
 
