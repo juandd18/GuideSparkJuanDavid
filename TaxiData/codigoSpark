@@ -70,6 +70,7 @@ def parse(line: String): (String, Trip) = {
 
 //call safe con la funcion de lectura para identificar 
 //que registros estan mal
+val taxiRaw = sc.textFile("/Users/juandavid/Documents/GuideSparkJuanDavid/TaxiData/trip_data_1.csv")
 val safeParse = safe(parse)
 val taxiParsed = taxiRaw.map(safeParse)
 taxiParsed.cache()
@@ -106,6 +107,36 @@ val taxiClean = taxiGood.filter {
         0 <= hrs && hrs < 5
       }
     }
+
+
+//get geographic json data 
+val geojson = scala.io.Source.fromURL(getClass.getResource("/nyc-boroughs.geojson")).mkString
+val geojson = scala.io.Source.fromFile("nyc-boroughs.geojson").mkString
+
+val features = geojson.parseJson.convertTo[FeatureCollection]
+
+
+case class Feature(id: Option[spray.json.JsValue],
+                   properties: Map[String, spray.json.JsValue],
+                   geometry: RichGeometry) {
+  def apply(property: String) = properties(property)
+  def get(property: String) = properties.get(property)
+}
+
+case class FeatureCollection(features: Array[Feature]) extends IndexedSeq[Feature] {
+  def apply(index: Int) = features(index)
+  def length = features.length
+}
+
+case class GeometryCollection(geometries: Array[RichGeometry]) extends IndexedSeq[RichGeometry] {
+  def apply(index: Int) = geometries(index)
+  def length = geometries.length
+}
+
+
+
+
+
 
 
 
