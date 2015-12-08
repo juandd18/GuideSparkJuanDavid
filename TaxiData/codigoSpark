@@ -1,3 +1,113 @@
 
 
-//prueba 
+//
+/Users/juandavid/Documents/spark-1.5.1-bin-hadoop2.6/bin/spark-shell --jars joda-time-2.9.jar,spray-json_2.11.jar,esri-geometry-api-1.2.1.jar,ch08-geotime-1.0.2.jar
+//
+
+import java.text.SimpleDateFormat
+
+import scala.collection.mutable.ArrayBuffer
+import scala.reflect.ClassTag
+
+import org.apache.spark.{HashPartitioner, Partitioner, SparkConf, SparkContext}
+import org.apache.spark.SparkContext._
+import org.apache.spark.rdd.RDD
+import org.apache.spark.util.StatCounter
+
+import com.esri.core.geometry.Point
+import org.joda.time.{DateTime, Duration}
+import spray.json._
+
+import com.cloudera.datascience.geotime.GeoJsonProtocol._
+
+val taxiRaw = sc.textFile("/Users/juandavid/Documents/GuideSparkJuanDavid/TaxiData/trip_data_1.csv")
+val taxiHead = taxiRaw.take(10)
+taxiHead.foreach(println)
+
+case class Trip(
+  pickupTime: DateTime,
+  dropoffTime: DateTime,
+  pickupLoc: Point,
+  dropoffLoc: Point)
+  
+val formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+  
+def point(longitude: String, latitude: String): Point = {
+    new Point(longitude.toDouble, latitude.toDouble)
+  }
+
+//IMPORTANTE
+/* Verifica que cada registro cumple con el formato del metodo
+parse y case class Trip. si no atrapa la excepcion
+The safe function takes an argument named f of type S => T and returns a new S =>
+Either[T, (S, Exception)] that will return either the result of calling f or, if an
+exception is thrown, a tuple containing the invalid input value and the exception
+itself
+*/
+def safe[S, T](f: S => T): S => Either[T, (S, Exception)] = {
+    new Function[S, Either[T, (S, Exception)]] with Serializable {
+      def apply(s: S): Either[T, (S, Exception)] = {
+        try {
+          Left(f(s))
+        } catch {
+          case e: Exception => Right((s, e))
+        }
+      }
+    }
+  }
+  
+def parse(line: String): (String, Trip) = {
+    val fields = line.split(',')
+    val license = fields(1)
+    val pickupTime = new DateTime(formatter.parse(fields(5)))
+    val dropoffTime = new DateTime(formatter.parse(fields(6)))
+    val pickupLoc = point(fields(10), fields(11))
+    val dropoffLoc = point(fields(12), fields(13))
+
+    val trip = Trip(pickupTime, dropoffTime, pickupLoc, dropoffLoc)
+    (license, trip)
+  }
+
+//call safe con la funcion de lectura para identificar 
+//que registros estan mal
+val safeParse = safe(parse)
+val taxiParsed = taxiRaw.map(safeParse)
+taxiParsed.cache()
+
+//mirar cuantos registros NO tuvieron errores y cuantos si
+taxiParsed.map(_.isLeft).countByValue().foreach(println)
+//(true,14776529) (false,87)
+
+//get the invalid records
+val taxiBad = taxiParsed.collect({
+      case t if t.isRight => t.right.get
+  })
+taxiBad.collect().foreach(println)
+
+//get valid records collect is a transformation
+val taxiGood = taxiParsed.collect({
+      case t if t.isLeft => t.left.get
+})
+taxiGood.cache()
+
+//halla el intervalo de horas de pickup and dropoff
+def hours(trip: Trip): Long = {
+  val d = new Duration(trip.pickupTime, trip.dropoffTime)
+  d.getStandardHours
+}
+
+taxiGood.values.map(hours).countByValue().toList.sorted.foreach(println)
+//(-8,1) (0,14752245) (1,22933) (2,842) (3,197) (4,86) (5,55) (6,42)
+
+//solo seleccionar los registros con tiempo de viaje mayor a cero y menor de
+val taxiClean = taxiGood.filter {
+      case (lic, trip) => {
+        val hrs = hours(trip)
+        0 <= hrs && hrs < 5
+      }
+    }
+
+
+
+
+
