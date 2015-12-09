@@ -1,4 +1,85 @@
 
 
-//ejemplo
+/*code to run
+./bin/spark-shell --jars /Users/juandavid/Documents/GuideSparkJuanDavid/MonteCarlo/joda-time-2.9.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/MonteCarlo/nscala-time_2.10-2.6.0.jar
+*/
 
+
+import java.io.File
+import java.text.SimpleDateFormat
+
+import scala.io.Source
+
+import com.github.nscala_time.time.Implicits._
+import org.joda.time.DateTime
+
+def readInvestingDotComHistory(file: File): Array[(DateTime, Double)] = {
+    val format = new SimpleDateFormat("MMM d, yyyy")
+    val lines = Source.fromFile(file).getLines().toSeq
+    lines.map(line => {
+      val cols = line.split('\t')
+      val date = new DateTime(format.parse(cols(0)))
+      val value = cols(1).toDouble
+      (date, value)
+    }).reverse.toArray
+  }
+  
+/**
+   * the line "lines.tail.map" works to is useful for excluding the header row
+   */
+  def readYahooHistory(file: File): Array[(DateTime, Double)] = {
+    val format = new SimpleDateFormat("yyyy-MM-dd")
+    val lines = Source.fromFile(file).getLines().toSeq
+    lines.tail.map(line => {
+      val cols = line.split(',')
+      val date = new DateTime(format.parse(cols(0)))
+      val value = cols(1).toDouble
+      (date, value)
+    }).reverse.toArray
+  }
+  
+  
+//We load all the data
+//and filter out instruments with less than five years of history
+
+val start = new DateTime(2009, 10, 23, 0, 0)
+val end = new DateTime(2014, 10, 23, 0, 0)
+  
+val files = new File("/Users/juandavid/Documents/GuideSparkJuanDavid/MonteCarlo/stocks/").listFiles()  
+
+
+//se filtra para solo 4 años
+val rawStocks = files.flatMap(file => {
+  try {
+    Some(readYahooHistory(file))
+  } catch {
+    case e: Exception => None
+  }
+}).filter(_.size >= 260*5+10)  
+  
+val factors1 = Array("crudeoil.tsv", "us30yeartreasurybonds.tsv").
+      map(x => new File("/Users/juandavid/Documents/GuideSparkJuanDavid/MonteCarlo/factors" + x)).
+      map(readInvestingDotComHistory)
+
+val factors2 = Array("^GSPC.csv", "^IXIC.csv").
+      map(x => new File("/Users/juandavid/Documents/GuideSparkJuanDavid/MonteCarlo/factors" + x)).
+      map(readYahooHistory)
+      
+
+/*
+First, we need to trim all of our time series to the same region in time.
+Then, we need to fill in missing values. To deal with time series that are missing values
+at the start and end dates in the time region, we simply fill in those dates with
+nearby values in the time region
+*/
+
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
