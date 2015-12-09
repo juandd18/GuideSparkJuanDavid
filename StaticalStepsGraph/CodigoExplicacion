@@ -4,7 +4,7 @@
 
 
 /* Para ejecutar spark en order los jars
-/Users/juandavid/Documents/spark-1.5.1-bin-hadoop2.6/bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,guava-18.0.jar
+./bin/spark-shell --jars /Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/common-1.0.2.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/breeze-viz_2.10-0.9.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/breeze_2.10-0.9.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/jcommon-1.0.16.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/jfreechart-1.0.13.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/guava-18.0.jar,/Users/juandavid/Documents/GuideSparkJuanDavid/StaticalStepsGraph/ch09-risk-1.0.2.jar
 bin/spark-shell --jars common-1.0.2.jar,breeze-viz_2.10-0.9.jar,breeze_2.10-0.9.jar,jcommon-1.0.16.jar,jfreechart-1.0.13.jar,
 */
 ##Line de comandos
@@ -37,6 +37,8 @@ import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapred.TextInputFormat
+
+import org.apache.commons.math3.distribution._
 
 import org.apache.hadoop.conf.Configuration
 import org.jfree.chart.axis.ValueAxis 
@@ -137,6 +139,7 @@ def plotDistributionKernel(samples: Map[Long,Int]) {
     toList.toArray
     val values = samples.values.map(x=>x.toDouble).toArray
     val densities = KernelDensity.estimate(values, domain)
+    
     val f = Figure()
     val p = f.subplot(0)
     p += plot(domain, densities)
@@ -171,6 +174,37 @@ def plotDistributionStd(samples: Map[Long,Int]) {
     p += plot(domain,values, '.')
     p.title = "data standarize"
 }
+
+def plotDistributionStd2(samples: scala.collection.Map[Long,Int]) = {
+    val min = samples.values.map(x=>x.toDouble).min
+    val max = samples.values.map(x=>x.toDouble).max
+    
+    val domain = samples.toArray.sortBy(_._1).map(x=>x._1.toDouble)
+    val values = samples.toArray.sortBy(_._1).map(x=> (x._2.toDouble))
+    val f = Figure()
+    val p = f.subplot(0)
+    p += plot(domain,values, '.')
+    p.title = "data"
+}
+
+import org.apache.commons.math3.distribution._
+
+val zip = new ZipfDistribution(30,1.9)
+val zip_valores = sc.parallelize(zip.sample(33050))
+val zip_Dist = zip_valores.countByValue().map(x=> (x._2,x._1))
+plotDistributionStd2(zip_Dist)
+
+val datoszip = org.apache.spark.mllib.linalg.Vectors.dense(zip_valores.map(x => x.toDouble).toArray)
+val vectdatos = Vectors.dense(countNombre.values.map(x=>x.toDouble).toArray)
+val goodnessOfFitTestResult = Statistics.chiSqTest(vectdatos,datoszip)
+/*
+Chi squared test summary:
+method: pearson
+degrees of freedom = 33049 
+statistic = 93953.88969149816 
+pValue = 0.0 
+Very strong presumption against null hypothesis: observed follows the same distribution as expected..
+*/
 
 //fit a distribution to valueDist
 //como se puede observar en el plot anterior 
