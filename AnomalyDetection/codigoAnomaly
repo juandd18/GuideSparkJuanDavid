@@ -119,5 +119,19 @@ def clusteringScore3(normalizedLabelsAndData: RDD[(String,Vector)], k: Int) = {
     labelCounts.map(m => m.sum * entropy(m)).sum / n
   }
   
-  
+val parseFunction = buildCategoricalAndLabelFunction(rawData)
+val labelsAndData = rawData.map(parseFunction)
+val normalizedLabelsAndData = labelsAndData.mapValues(buildNormalizationFunction(labelsAndData.values)).cache()
+
+//entre diferentes valores de k, se realiza kmeans se elije el que 
+//tenga la menor entropy
+(80 to 160 by 10).map(k => (k, clusteringScore3(normalizedLabelsAndData, k))).toList.foreach(println)
+normalizedLabelsAndData.unpersist()
+    
+    
+    
+    
+    
+    
+    
 
