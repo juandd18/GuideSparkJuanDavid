@@ -61,7 +61,7 @@ def loadMedline(sc: SparkContext, path: String) = {
 
 
 
-//val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/medsamp2015a.xml")
+//val registrosRaw = loadMedline(sc,"/Users/juandavid/Documents/medline_data/*.xml")
 
 //val path = "hdfs://ec2-54-237-83-252.compute-1.amazonaws.com:9000/medsamp2015a.xml"
 
@@ -130,6 +130,7 @@ valueDist.toSeq.sorted.take(10).foreach(println)
 //importar para hacer plot y kernel density
 import org.apache.spark.mllib.stat.KernelDensity
 import org.apache.spark.rdd.RDD
+import com.cloudera.datascience.risk.KernelDensity
 
 //function that creates kernel density
 def plotDistributionKernel(samples: Map[Long,Int]) {
@@ -205,6 +206,13 @@ statistic = 93953.88969149816
 pValue = 0.0 
 Very strong presumption against null hypothesis: observed follows the same distribution as expected..
 */
+
+
+val wb = new WeibullDistribution(1.0,1.5)
+val wb_valores = sc.parallelize(wb.sample(500))
+val wb_Dist = wb_valores.map(x=> math.round(x)).countByValue().map(x=> (x._1,x._2.toInt))
+plotDistributionStd2(wb_Dist)
+
 
 //fit a distribution to valueDist
 //como se puede observar en el plot anterior 
