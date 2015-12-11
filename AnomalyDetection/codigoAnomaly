@@ -128,7 +128,40 @@ val normalizedLabelsAndData = labelsAndData.mapValues(buildNormalizationFunction
 (80 to 160 by 10).map(k => (k, clusteringScore3(normalizedLabelsAndData, k))).toList.foreach(println)
 normalizedLabelsAndData.unpersist()
     
-    
+def buildAnomalyDetector(
+      data: RDD[Vector],
+      normalizeFunction: (Vector => Vector)): (Vector => Boolean) = {
+    val normalizedData = data.map(normalizeFunction)
+    normalizedData.cache()
+
+    val kmeans = new KMeans()
+    kmeans.setK(150)
+    kmeans.setRuns(10)
+    kmeans.setEpsilon(1.0e-6)
+    val model = kmeans.run(normalizedData)
+
+    normalizedData.unpersist()
+
+    val distances = normalizedData.map(datum => distToCentroid(datum, model))
+    val threshold = distances.top(100).last
+
+    (datum: Vector) => distToCentroid(normalizeFunction(datum), model) > threshold
+  }
+
+  def anomalies(rawData: RDD[String]) = {
+    val parseFunction = buildCategoricalAndLabelFunction(rawData)
+    val originalAndData = rawData.map(line => (line, parseFunction(line)._2))
+    val data = originalAndData.values
+    val normalizeFunction = buildNormalizationFunction(data)
+    val anomalyDetector = buildAnomalyDetector(data, normalizeFunction)
+    val anomalies = originalAndData.filter {
+      case (original, datum) => anomalyDetector(datum)
+    }.keys
+    anomalies.take(10).foreach(println)
+  }
+
+anomalies(rawData)
+
     
     
     
