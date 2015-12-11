@@ -1,1 +1,122 @@
-//ejemploe
+
+
+//./bin/spark-shell
+
+import scala.collection.Map
+import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
+
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.mllib.recommendation._
+import org.apache.spark.rdd.RDD
+
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.types._
+
+val rawUserArtistData = sc.textFile("/Users/juandavid/Documents/GuideSparkJuanDavid/MusicRecomender/musicData/user_artist_data.txt")
+
+//one way to get stats from user id
+rawUserArtistData.map(_.split(' ')(0).toDouble).stats()
+
+val schema =
+      StructType(
+        Array(
+          StructField("userid", LongType, true),
+          StructField("itemid", LongType, true),
+          StructField("value", LongType, true)
+        )
+      )
+
+//val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+//impor sqlContext.implicits._
+val rowRDD_userartist = rawUserArtistData.map(x=>x.split(" ")).map(p => Row(p(0).toLong,p(1).toLong,p(2).toLong))
+val userartistDF = sqlContext.createDataFrame(rowRDD_userartist, schema)
+
+userartistDF.describe().show()
+//delete na values
+userartistDF.na.drop().size
+
+
+
+val rawArtistData = sc.textFile("/Users/juandavid/Documents/GuideSparkJuanDavid/MusicRecomender/musicData/artist_data.txt")
+
+//skip bad data 
+def buildArtistByID(rawArtistData: RDD[String]) =
+    rawArtistData.flatMap { line =>
+      val (id, name) = line.span(_ != '\t')
+      if (name.isEmpty) {
+        None
+      } else {
+        try {
+          Some((id.toInt, name.trim))
+        } catch {
+          case e: NumberFormatException => None
+        }
+      }
+    }
+
+def buildArtistAlias(rawArtistAlias: RDD[String]): Map[Int,Int] =
+    rawArtistAlias.flatMap { line =>
+      val tokens = line.split('\t')
+      if (tokens(0).isEmpty) {
+        None
+      } else {
+        Some((tokens(0).toInt, tokens(1).toInt))
+      }
+    }.collectAsMap()
+
+
+def buildRatings(rawUserArtistData: RDD[String],bArtistAlias: Broadcast[Map[Int,Int]]) = {
+    rawUserArtistData.map { line =>
+      val Array(userID, artistID, count) = line.split(' ').map(_.toInt)
+      val finalArtistID = bArtistAlias.value.getOrElse(artistID, artistID)
+      Rating(userID, finalArtistID, count)
+    }
+  }
+
+//create ALS model primera prueba
+
+val rawArtistAlias = sc.textFile("/Users/juandavid/Documents/GuideSparkJuanDavid/MusicRecomender/musicData/artist_alias.txt")
+val bArtistAlias = sc.broadcast(buildArtistAlias(rawArtistAlias))
+
+val trainData = buildRatings(rawUserArtistData, bArtistAlias).cache()
+
+val model = ALS.trainImplicit(trainData, 10, 5, 0.01, 1.0)
+
+trainData.unpersist()
+
+//test recommendation
+val userID = 2093760
+val recommendations = model.recommendProducts(userID, 5)
+//print recomendations
+recommendations.foreach(println)
+
+val recommendedProductIDs = recommendations.map(_.product).toSet
+
+val rawArtistsForUser = rawUserArtistData.map(_.split(' ')).filter { case Array(user,_,_) => user.toInt == userID }
+val existingProducts = rawArtistsForUser.map { case Array(_,artist,_) => artist.toInt }.collect().toSet
+val artistByID = buildArtistByID(rawArtistData)
+
+//nombre de artistas que el usuario escuho
+artistByID.filter { case (id, name) => existingProducts.contains(id) }.values.collect().foreach(println)
+//nombre de artistas que se predijieron
+artistByID.filter { case (id, name) => recommendedProductIDs.contains(id) }.values.collect().foreach(println)
+
+def unpersist(model: MatrixFactorizationModel): Unit = {
+    // At the moment, it's necessary to manually unpersist the RDDs inside the model
+    // when done with it in order to make sure they are promptly uncached
+    model.userFeatures.unpersist()
+    model.productFeatures.unpersist()
+  }
+//unpersist the values of the model
+unpersit(model)
+
+//better model
+
+
+
+
+
+
+    
+    
