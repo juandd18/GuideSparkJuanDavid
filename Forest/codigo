@@ -91,6 +91,21 @@ println(getMetrics(model, testData).precision)
 println(getMetrics(model, trainData.union(cvData)).precision)
 
 
+
+//unencode features
+def unencodeOneHot(rawData: RDD[String]): RDD[LabeledPoint] = {
+    rawData.map { line =>
+      val values = line.split(',').map(_.toDouble)
+      // Which of 4 "wilderness" features is 1
+      val wilderness = values.slice(10, 14).indexOf(1.0).toDouble
+      // Similarly for following 40 "soil" features
+      val soil = values.slice(14, 54).indexOf(1.0).toDouble
+      // Add derived features back to first 10
+      val featureVector = Vectors.dense(values.slice(0, 10) :+ wilderness :+ soil)
+      val label = values.last - 1
+      LabeledPoint(label, featureVector)
+    }
+  }
 //RANDOM FOREST
 def evaluateForest(rawData: RDD[String]): Unit = {
 
