@@ -53,13 +53,79 @@ movieOuterJoinedGraph.vertices.foreach(println)
 //(1,Actor(George Cloney,,))
 
 
+val actors = movieGraph.vertices
+
+//vamos a utilizar leftJoin solo en vertices
+actors.leftJoin(bio)((vid, name, b) => b match {
+case Some(bio) => name + " is from " + bio.hometown
+case None => name + "\'s hometown is unknown"
+}).foreach(println)
+
+//how to create a bidirectional graph 
+val movies = movieGraph.edges
+val bidirectedGraph = Graph(actors, movies union movies.reverse)
 
 
+///////Example from food network
+//how to create a bipartite graph
+trait FNNode
+case class Ingredient(name: String, category: String) extends FNNode 
+case class Compound(val name: String, cas: String) extends FNNode
+        
+// Load ingredient nodes
+val ingredients: RDD[(VertexId, FNNode)] = sc.textFile("./data/Food_network/ingr_info.tsv").
+filter(! _.startsWith("#")).map {line =>
+val row = line split '\t'
+(row(0).toInt, Ingredient(row(1), row(2)))
+}
 
+val compounds: RDD[(VertexId,FNNode)] = sc.textFile("./data/Food_network/comp_info.tsv").
+filter(! _.startsWith("#")).map{ line =>
+val row = line split '\t'
+(row(0).toInt,Compound(row(1), row(2)))
+}
 
+//load edges
+val links: RDD[Edge[Int]] = sc.textFile("./data/Food_network/ingr_comp.tsv").
+filter(! _.startsWith("#")).map {line =>
+val row = line split '\t'
+Edge(row(0).toInt, 10000L + row(1).toInt, 1)
+}
 
+// Ingredient-compound network
+val nodes = ingredients ++ compounds
+val foodNetwork = Graph(nodes, links)
 
+//returns (compound id, Array[ingredient id])
+val similarIngr: RDD[(VertexId, Array[VertexId])] = foodNetwork.collectNeighborIds(EdgeDirection.In)
 
+//function pairIngredients that takes one such tuple of (compoundid, Array[ingredient id]) and creates an edge between every pair of ingredients
+//in the array
+def pairIngredients(ingPerComp: (VertexId, Array[VertexId])): Array[Edge[Int]] = for {
+x <- ingPerComp._2
+y <- ingPerComp._2
+if x != y
+} yield Edge(x,y,1)
+
+val flavorPairRDD: RDD[Edge[Int]] = similarIngr flatMap pairIngredients
+
+//create new graph with ingredients pairs
+val flavorNetwork = Graph(ingredients, flavorPairRDD).cache
+
+//Notice that duplicate edges are possible when a pair of ingredients share more than one compound.
+//so we are going to group edges
+val flavorWeightedNetwork = flavorNetwork.partitionBy(PartitionStrategy.EdgePartition2D).
+groupEdges((x,y) => x+y) //sum the property of the edge
+//*
+groupEdges requires the graph to be repartitioned because
+it assumes that identical edges will be co-located on the
+same partition. Thus, you must call partitionBy prior to
+grouping the edges.
+*//
+
+//let's print the 20 pairs of ingredients that share the most compounds
+flavorWeightedNetwork.triplets.sortBy(t => t.attr, false).take(20).
+foreach(println)
 
 
 
