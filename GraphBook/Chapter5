@@ -1,1 +1,298 @@
-//ejemplo
+
+import org.apache.spark.SparkContext
+import org.apache.spark.SparkContext._
+import org.apache.spark.SparkConf
+import org.apache.spark.graphx._
+import org.apache.spark.rdd.RDD
+
+case class GameStats(
+val score: Int,
+val fieldGoalMade: Int,
+val fieldGoalAttempt: Int,
+val threePointerMade: Int,
+val threePointerAttempt: Int,
+val threeThrowsMade: Int,
+val threeThrowsAttempt: Int,
+val offensiveRebound: Int,
+val defensiveRebound: Int,
+val assist: Int,
+val turnOver: Int,
+val steal: Int,
+val block: Int,
+val personalFoul: Int
+){
+  def fgPercent: Double = 100.0 * fieldGoalMade / fieldGoalAttempt
+  def tpPercent: Double = 100.0 * threePointerMade / threePointerAttempt
+  def ftPercent: Double = 100.0 * threeThrowsMade / threeThrowsAttempt
+  override def toString: String = "Score: " +score
+}
+
+trait GameResult
+
+case class FullResult(
+val season: Int,
+val day: Int,
+val loc: String,
+val winnerStats: GameStats,
+val loserStats: GameStats ) extends GameResult
+
+//create the vertex 
+val teams: RDD[(VertexId,String)] = sc.textFile("./data/teamsData/teams.csv").
+filter(! _.startsWith("#")).map{ line => 
+val row = line split ','
+(row(0).toInt,row(1))
+}
+
+//create edges
+//veriticeid1 = winner team, veriticeid2 = losser team
+val detailedStats: RDD[Edge[FullResult]] = sc.textFile("./data/teamsData/stats.csv").
+map {line =>
+val row = line split ','
+Edge(row(2).toInt, row(4).toInt, 
+  FullResult(row(0).toInt, row(1).toInt, row(6),
+  GameStats(      
+  score = row(3).toInt,
+  fieldGoalMade = row(8).toInt,
+  fieldGoalAttempt = row(9).toInt, 
+  threePointerMade = row(10).toInt,
+  threePointerAttempt = row(11).toInt,   
+  threeThrowsMade = row(12).toInt,
+  threeThrowsAttempt = row(13).toInt, 
+  offensiveRebound = row(14).toInt,
+  defensiveRebound = row(15).toInt,
+  assist = row(16).toInt,
+  turnOver = row(17).toInt,
+  steal = row(18).toInt,
+  block = row(19).toInt,
+  personalFoul = row(20).toInt
+  ),
+  GameStats(
+  score = row(5).toInt,
+  fieldGoalMade = row(21).toInt,
+  fieldGoalAttempt = row(22).toInt, 
+  threePointerMade = row(23).toInt,
+  threePointerAttempt = row(24).toInt,
+  threeThrowsMade = row(25).toInt,
+  threeThrowsAttempt = row(26).toInt, 
+  offensiveRebound = row(27).toInt,
+  defensiveRebound = row(28).toInt,
+  assist = row(20).toInt,
+  turnOver = row(30).toInt,
+  steal = row(31).toInt,
+  block = row(32).toInt,
+  personalFoul = row(33).toInt)
+  )
+)
+}
+
+//create graph
+
+val scoreGraph = Graph(teams,detailedStats)
+
+//shows wichs teams beat Duke.
+//srcAttr = winner team, dstAttr = losser team
+scoreGraph.triplets.filter(_.dstAttr == "Duke").foreach(println)
+//((1274,Miami FL),(1181,Duke),FullResult(2015,71,A,Score: 90-74))....
+
+
+////*aggregateMessages*/////
+// count games played and Aggregate the total field goals made by winning teams , the games that the teams lost will not be counted
+type FGMsg = (Int, Int)
+val winningFieldGoalMade: VertexRDD[FGMsg] = scoreGraph aggregateMessages(
+// sendMsg (1: uno por cada juego, fields anotados)
+triplet => triplet.sendToSrc(1, triplet.attr.winnerStats.fieldGoalMade)
+// mergeMsg (sumar los juegos, suma los puntos)
+,(x, y) => (x._1 + y._1, x._2+ y._2)
+)
+
+// Average field goals made per Game by winning teams
+val avgWinningFieldGoalMade: VertexRDD[Double] = winningFieldGoalMade.mapValues(
+(id: VertexId, x: FGMsg) => x match {
+case (count: Int, total: Int) => total.toDouble/count
+})
+
+// Aggregate the points scored by winning teams
+val winnerTotalPoints: VertexRDD[FGMsg] = scoreGraph.aggregateMessages[FGMsg](
+// sendMsg
+triplet => triplet.sendToSrc(1, triplet.attr.winnerStats.score), 
+// mergeMsg
+(x, y) => (x._1 + y._1, x._2+ y._2)
+)
+
+// Average Points Per Game by winning teams
+var winnersPPG: VertexRDD[Double] = winnerTotalPoints mapValues (
+(id: VertexId, x: FGMsg) => x match {
+  case (count: Int, total: Int) => total/count
+})
+
+
+// Generic function for stats averaging
+def averageWinnerStat(graph: Graph[String, FullResult])(getStat: GameStats => Double): VertexRDD[Double] = {
+  type Msg = (Int, Double)
+  val winningScore: VertexRDD[Msg] = graph.aggregateMessages[Msg](
+  // sendMsg
+  triplet => triplet.sendToSrc(1,getStat(triplet.attr.winnerStats)),
+  // mergeMsg
+  (x, y) => (x._1 + y._1, x._2+ y._2)
+  )
+  winningScore mapValues ( (id: VertexId, x: Msg) => x match {
+    case (count: Int, total: Double) => total/count
+  })
+}
+
+// Getting individual stats
+def threePointMade(stats: GameStats) = stats.threePointerMade
+
+//usar Generic Function
+val winnersThreePointMade = averageWinnerStat(scoreGraph)(threePointMade)
+//sort and show which team has the highest avg of three points made
+winnersThreePointMade.sortBy(_._2,false).take(5).foreach(println)
+
+//call the method from GameStats
+def threePointPercent(stats: GameStats) = stats.tpPercent
+val winnersThreePointPercent = averageWinnerStat(scoreGraph)(threePointPercent)
+
+///Global generic function
+trait Teams
+case class Winners extends Teams
+case class Losers extends Teams
+case class AllTeams extends Teams
+
+def averageStat(graph: Graph[String, FullResult])(getStat: GameStats => Double, tms: Teams): VertexRDD[Double] = {
+            type Msg = (Int, Double)
+            val aggrStats: VertexRDD[Msg] = graph.aggregateMessages[Msg](
+                // sendMsg
+                tms match {
+                    case _ : Winners => t => t.sendToSrc((1, getStat(t.attr.winnerStats)))
+                    case _ : Losers  => t => t.sendToDst((1, getStat(t.attr.loserStats)))
+                    case _       => t => {
+                        t.sendToSrc((1, getStat(t.attr.winnerStats)))
+                        t.sendToDst((1, getStat(t.attr.loserStats)))
+                    }
+                }
+                , 
+                // mergeMsg
+                (x, y) => (x._1 + y._1, x._2+ y._2)
+            )
+
+            aggrStats mapValues (
+                (id: VertexId, x: Msg) => x match {
+                    case (count: Int, total: Double) => total/count
+                })
+        }
+
+// Average Three Point Made Per Game for All Teams
+val allThreePointMade = averageStat(scoreGraph)(threePointMade,AllTeams())
+allThreePointMade.sortBy(_._2, false).take(5).foreach(println)
+
+
+def score(stats: GameStats) = stats.score
+// Winning teams average point score
+val winnerAvgPPG = averageStat(scoreGraph)(score, Winners())
+
+//the winning team with largest score
+winnerAvgPPG.max()(Ordering.by(_._2))
+
+//the winning team with lowest score
+winnerAvgPPG.min()(Ordering.by(_._2))
+
+
+// Average Stats of All Teams FALTA PROBAR OJO
+case class TeamStat(
+                wins: Int  = 0      // Number of wins
+             ,losses: Int  = 0      // Number of losses
+                ,ppg: Int  = 0      // Points per game
+                ,pcg: Int  = 0      // Points conceded per game
+                ,fgp: Double  = 0   // Field goal percentage
+                ,tpp: Double  = 0   // Three point percentage
+                ,ftp: Double  = 0   // Free Throw percentage
+             ){
+            override def toString = wins + "-" + losses
+        }
+
+        // Aggregating average statistics for all teams 
+        val teamStats: VertexRDD[TeamStat] = {
+            type Msg = (Int, Int, Int, Int, Int, Double, Double, Double)
+
+            val aggrStats: VertexRDD[Msg] = scoreGraph.aggregateMessages[Msg](
+                // sendMsg
+                t => {
+                        t.sendToSrc((   1,
+                                        1, 0, 
+                                        t.attr.winnerStats.score, 
+                                        t.attr.loserStats.score,
+                                        t.attr.winnerStats.fgPercent,
+                                        t.attr.winnerStats.tpPercent,
+                                        t.attr.winnerStats.ftPercent
+                                   ))
+                        t.sendToDst((   1,
+                                        0, 1, 
+                                        t.attr.loserStats.score, 
+                                        t.attr.winnerStats.score,
+                                        t.attr.loserStats.fgPercent,
+                                        t.attr.loserStats.tpPercent,
+                                        t.attr.loserStats.ftPercent
+                                   ))
+                     }
+                , 
+                // mergeMsg
+                (x, y) => ( x._1 + y._1, x._2 + y._2, 
+                            x._3 + y._3, x._4 + y._4,
+                            x._5 + y._5, x._6 + y._6,
+                            x._7 + y._7, x._8 + y._8
+                        )
+            )
+
+            // Return VertexRDD[TeamStat]
+            aggrStats mapValues (
+                (id: VertexId, m: Msg) => m match {
+                    case ( count: Int, 
+                            wins: Int, 
+                          losses: Int,
+                          totPts: Int, 
+                      totConcPts: Int, 
+                           totFG: Double,
+                           totTP: Double, 
+                           totFT: Double)  => TeamStat( wins, losses,
+                                                        totPts/count,
+                                                        totConcPts/count,
+                                                        totFG/count,
+                                                        totTP/count,
+                                                        totFT/count)
+
+                })
+        }
+
+// Joining the average stats to vertex attributes
+case class Team(name: String, stats: Option[TeamStat]) {
+            override def toString = name + ": " + stats}
+
+def addTeamStat(id: VertexId, t: Team, stats: TeamStat) = Team(t.name, Some(stats))
+ 
+val statsGraph: Graph[Team, FullResult] = scoreGraph.mapVertices((_, name) => Team(name, None)).
+    joinVertices(teamStats)(addTeamStat)
+
+//create an orderion specific option
+object winsOrdering extends Ordering[Option[TeamStat]] {
+            def compare(x: Option[TeamStat], y: Option[TeamStat]) = (x, y) match {
+                case (None, None)       => 0 
+                case (Some(a), None)    => 1
+                case (None, Some(b))    => -1
+                case (Some(a), Some(b)) => if (a.wins == b.wins) a.losses compare b.losses
+                                           else a.wins compare b.wins
+            }
+        }
+
+import scala.reflect.ClassTag
+import scala.math.Ordering 
+// Printing the top 10 Teams with most victories during regular season
+statsGraph.vertices.sortBy(v => v._2.stats,false)(winsOrdering, classTag[Option[TeamStat]]).take(10).foreach(println)
+
+//ERROR: error: not found: value classTag
+
+
+
+
+
+
+
