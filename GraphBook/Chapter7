@@ -1,1 +1,62 @@
-//ejemplo
+
+
+import org.apache.spark.graphx._
+import org.apache.spark.rdd.RDD
+import scala.io.Source
+import org.apache.spark.mllib.clustering.{PowerIterationClustering, PowerIterationClusteringModel}
+import org.apache.spark.mllib.linalg.Vectors
+
+
+case class Song(title: String,artist: String,tags: Set[String]){
+override def toString: String = title + ", "+ artist
+}
+
+var songs :RDD[(VertexId,Song)] = sc.textFile("./data/music/song_hash.txt").
+map{ line =>
+val lin = line split '\t'
+val vid = lin(0).toLong
+val son = Song(lin(1),lin(2),Set.empty)
+(vid,son)
+}
+
+
+//create a graph with zero edges
+val graphFromSongs: Graph[Song, Int] = {
+val zeroEdge: RDD[Edge[Int]] = sc.parallelize(Nil)
+Graph(songs, zeroEdge)
+}
+
+// Get the tags
+val tagIter: Iterator[(VertexId, Set[String])] = 
+            Source.fromFile("./data/music/tags.txt").getLines.zipWithIndex.
+            map {
+                x => 
+                val tags = x._1 split ' '
+                (x._2.toLong, tags.toSet)
+            }
+val tagRDD = sc.parallelize(tagIter.toSeq)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
