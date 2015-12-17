@@ -36,18 +36,76 @@ val tagIter: Iterator[(VertexId, Set[String])] =
             }
 val tagRDD = sc.parallelize(tagIter.toSeq)
 
+// Addt the tags into the music graph
+val songsNtags = graphFromSongs.joinVertices(tagRDD){
+            (id, s, ks) => ks.toList match {
+                case List("#") => s
+                case _         => {
+                    val tags: Map[Int, String] = 
+                    Source.fromFile("./data/music/tag_hash.txt").getLines().
+                    map {
+                        line => 
+                        val row  = line split ", "
+                        row(0).toInt -> row(1)
+                    }.toMap
 
+                    val songTags = ks.map(_.toInt) flatMap (tags get)
+                    Song(s.title, s.artist, songTags.toSet)
+                }
+            }   
+       }
 
+// Return the Jaccard similarity measure based on tags
+def similarity(one: Song, other: Song):Double = {
+val numCommonTags = (one.tags intersect other.tags).size
+val numTotalTags = (one.tags union other.tags).size
+numCommonTags.toDouble / numTotalTags.toDouble
+}
 
+// Returns true if the Jaccard similarity score exceeds a given threshold
+def similarByTags(one: Song, other: Song, threshold: Double): Boolean = {
+ val commonTags = one.tags intersect other.tags
+ val combinedTags = one.tags union other.tags
+ commonTags.size > combinedTags.size * threshold
+}
 
+// Returns true if not duplicate songs
+def differentSong(one: Song, other: Song): Boolean = one.title != other.title || one.artist != other.artist
 
+// First, get the songs with tags
+songs = songsNtags.vertices
 
+// Then, compute the similarity between each pair of songs
+// with a similarity score larger than 0.7
+val similarConnections: RDD[Edge[Double]] = {
+            val ss = songs cartesian songs
+            val similarSongs = ss filter {
+                p => p._1._1 != p._2._1 && 
+                similarByTags(p._1._2, p._2._2, 0.7) && 
+                differentSong(p._1._2, p._2._2)
+            }
+            similarSongs map {
+                p => {
+                    val jacIdx = similarity(p._1._2, p._2._2)
+                    Edge(p._1._1, p._2._1, jacIdx)
+                }
+            }
+        }
 
+// This is the resulting graph
+val similarByTagsGraph = Graph(songs, similarConnections)
 
+//graph with more than 5 tags
+val similarHighTagsGraph = similarByTagsGraph.subgraph(vpred = (id: VertexId, attr: Song) => attr.tags.size > 5)
 
+similarHighTagsGraph.triplets.take(10).foreach(t => println(t.srcAttr + " ~~~ " + t.dstAttr + " => " + t.attr))
 
+//create affinity matrix to use PIC clustering
+val similarities: RDD[(Long,Long,Double)] = similarHighTagsGraph.triplets.map{t => (t.srcId, t.dstId, t.attr)}
 
-
+// Build and run the Power Iteration Clustering model
+val pic = new PowerIterationClustering().setK(7).setMaxIterations(20)
+val clusteringModel = pic.run(similarities)
 
 
 
