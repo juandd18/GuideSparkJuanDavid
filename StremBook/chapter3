@@ -11,7 +11,8 @@ import java.io.ObjectOutput
 import java.io.ByteArrayOutputStream
 
 val conf = new SparkConf()
-val streamCtx = new StreamingContext(conf, Seconds(2))
+//val streamCtx = new StreamingContext(conf, Seconds(2))
+val streamCtx = new StreamingContext(sc, Seconds(2))
 
 //Create an Array of InetSocketaddress containing the  Host and the Port of the machines 
 //where Flume Sink is delivering the Events
