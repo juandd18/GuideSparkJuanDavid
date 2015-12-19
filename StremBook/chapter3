@@ -24,7 +24,7 @@ val streamCtx = new StreamingContext(sc, Seconds(2))
 //4. a2.sinks.spark1.port 
 var addresses = new Array[InetSocketAddress](2);
 
-addresses(0) = new InetSocketAddress("10.0.2.15",4949)
+addresses(0) = new InetSocketAddress("localhost",4949)
 
 
 //Create a Flume Polling Stream which will poll the Sink the get the events 
