@@ -69,7 +69,7 @@ streamCtx.awaitTermination();
 import org.apache.spark.streaming._
 
 import org.apache.spark.streaming.flume._
-
+import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.IntParam
 
 
@@ -85,6 +85,21 @@ stream.map(event => "Eventheader : header " +event.event.get(0).toString + " bod
 
 streamCtx.start()
 
+
+
+//version org.apache in flume
+
+val streamCtx = new StreamingContext(sc, Seconds(2))
+
+val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
+
+stream.count().map(cnt => "Received " + cnt + " flume events." ).print()
+
+stream.map(e => new String(e.event.getBody.array() ) ).print()
+
+stream.map(event => "Eventheader : header " +event.event.get(0).toString + " body " + new String(event.event.getBody.array)).print
+
+streamCtx.start()
 
 
 
