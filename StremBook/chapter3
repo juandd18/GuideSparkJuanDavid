@@ -79,6 +79,8 @@ val stream = FlumeUtils.createStream(streamCtx, "10.0.2.15", 4951, StorageLevel.
 
 stream.count().map(cnt => "Received " + cnt + " flume events." ).print()
 
+stream.map(e => new String(e.event.getBody.array() ) ).print()
+
 streamCtx.start()
 
 
