@@ -66,6 +66,24 @@ streamCtx.start();
 streamCtx.awaitTermination();
 
 
+import org.apache.spark.streaming._
+import org.apache.spark.streaming._
+
+scala> import org.apache.spark.streaming.flume._
+import org.apache.spark.streaming.flume._
+
+scala> import org.apache.spark.util.IntParam
+import org.apache.spark.util.IntParam
+
+scala> val streamCtx = new StreamingContext(sc, Seconds(2))
+streamCtx: org.apache.spark.streaming.StreamingContext = org.apache.spark.streaming.StreamingContext@2c82f385
+
+scala> val stream = FlumeUtils.createStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
+stream: org.apache.spark.streaming.dstream.ReceiverInputDStream[org.apache.spark.streaming.flume.SparkFlumeEvent] = org.apache.spark.streaming.flume.FlumeInputDStream@161a7e3d
+
+scala> stream.count().map(cnt => "Received " + cnt + " flume events." ).print()
+
+scala> streamCtx.start()
 
 
 
