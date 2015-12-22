@@ -38,19 +38,8 @@ import java.io.ByteArrayOutputStream
 import java.util.regex.Pattern
 import java.util.regex.Matcher
 
-//create method which uses regex to read a text streaming
-def transformLogData(Logline: String) : Map[String,String] = {
-    //pattern which extract the revelant data from log files
-    val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)""";
-    val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
-    val matcher = PATTERN.matcher(Logline);
-    
-    //when a line of string does not belong to the pattern
-    if(!matcher.find()){
-      System.out.println("Cannot parse logline "+ Logline); 
-    }
-    
-    val mapLeer = new Map[String,String](
+ def createMap(matcher:Matcher) :Map[String,String] = {
+    return Map[String,String](
       ("IP" -> matcher.group(1)),
       ("client" -> matcher.group(2)),
       ("user" -> matcher.group(3)),
@@ -61,8 +50,22 @@ def transformLogData(Logline: String) : Map[String,String] = {
       ("respCode" -> matcher.group(8)),
       ("size" -> matcher.group(9))
       )
-      
-    return mapLeer
+    }
+ 
+//create method which uses regex to read a text streaming
+def transformLogData(Logline: String) : Map[String,String] = {
+    //pattern which extract the revelant data from log files
+    val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)""";
+    val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
+    val matcher = PATTERN.matcher(Logline);
+    
+    //when a line of string does not belong to the pattern
+    if(!matcher.find()){
+      println("Cannot parse logline "+ Logline); 
+    }
+    
+    createMap(matcher)
+    
  }
  
 val streamCtx = new StreamingContext(sc, Seconds(3))
