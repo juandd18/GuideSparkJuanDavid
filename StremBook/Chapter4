@@ -1,1 +1,120 @@
-//ejemplo
+
+//flume file 
+#create agent name a1
+a1.sources = source1
+a1.channels = channel1
+a1.sinks = sink1
+
+
+#configures source a1
+a1.sources.source1.type = netcat
+a1.sources.source1.bind = 10.0.2.15
+a1.sources.source1.port = 4949
+a1.sources.source1.channels = channel1
+
+#define a channel 
+a1.channels.channel1.type = memory
+a1.channels.channel1.capacity = 2000
+
+
+#define sink
+a1.sinks.sink1.type = org.apache.spark.streaming.flume.sink.SparkSink
+a1.sinks.sink1.hostname = 10.0.2.15
+a1.sinks.sink1.port = 4951
+a1.sinks.sink1.channel = channel1
+
+
+import org.apache.spark.SparkConf
+import org.apache.spark.streaming._
+import org.apache.spark.streaming.flume._
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.rdd._
+import org.apache.spark.streaming.dstream._
+import java.net.InetSocketAddress
+import java.io.ObjectOutputStream
+import java.io.ObjectOutput
+import java.io.ByteArrayOutputStream
+
+import java.util.regex.Pattern
+import java.util.regex.Matcher
+
+//create method which uses regex to read a text streaming
+def transformLogData(Logline: String) : Map[String,String] = {
+    //pattern which extract the revelant data from log files
+    val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)""";
+    val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
+    val matcher = PATTERN.matcher(Logline);
+    
+    //when a line of string does not belong to the pattern
+    if(!matcher.find()){
+      System.out.println("Cannot parse logline "+ Logline); 
+    }
+    
+    val mapLeer = new Map[String,String](
+      ("IP" -> matcher.group(1)),
+      ("client" -> matcher.group(2)),
+      ("user" -> matcher.group(3)),
+      ("date" -> matcher.group(4)),
+      ("method" -> matcher.group(5)),
+      ("request" -> matcher.group(6)),
+      ("protocol" -> matcher.group(7)),
+      ("respCode" -> matcher.group(8)),
+      ("size" -> matcher.group(9))
+      )
+      
+    return mapLeer
+ }
+ 
+val streamCtx = new StreamingContext(sc, Seconds(3))
+
+val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
+
+val newDstream = stream.flatMap{ x => transformLogData(new String(x.event.getBody().array() ))}
+
+//print the values of the Dstream
+def printLogvalues(stream: DStream[(String,String)],streamCtx: StreamingContext){
+  
+  def foreachFunc = (rdd: RDD[(String,String)]) => {
+  val array = rdd.take(2)
+  println("----------- start printing results ----------")
+  for(dataMap <- array.array){
+    print(dataMap._1,"-----",dataMap._2)
+  }
+  println("----------- finishing printing results ----------")
+  }
+  
+  //use foreach function
+  stream.foreachRDD(foreachFunc)
+}
+
+def executeTransformation(dStream: DStream[(String,String)],streamCtx: StreamingContext){
+  
+  //print values
+  printLogvalues(dStream,streamCtx)
+}
+
+
+executeTransformation(newDstream,streamCtx)
+
+streamCtx.start()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
