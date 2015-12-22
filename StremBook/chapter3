@@ -1,69 +1,28 @@
-//spark-shell --jars /etc/flume-ng/libs/spark-streaming-flume_2.10-1.3.0.jar,/etc/flume-ng/libs/spark-streaming-flume-sink_2.10-1.3.0.jar
 
-import org.apache.spark.SparkConf
-import org.apache.spark.streaming._
-import org.apache.spark.streaming.flume._
-import org.apache.spark.storage.StorageLevel
-import org.apache.spark.rdd._
-import org.apache.spark.streaming.dstream._
-import java.net.InetSocketAddress
-import java.io.ObjectOutputStream
-import java.io.ObjectOutput
-import java.io.ByteArrayOutputStream
-
-//val conf = new SparkConf()
-//val streamCtx = new StreamingContext(conf, Seconds(2))
-val streamCtx = new StreamingContext(sc, Seconds(2))
-
-//Create an Array of InetSocketaddress containing the  Host and the Port of the machines 
-//where Flume Sink is delivering the Events
-//Basically it is the value of following properties defined in Flume Config: -
-//1. a1.sinks.spark.hostname
-//2. a1.sinks.spark.port
-//3. a2.sinks.spark1.hostname
-//4. a2.sinks.spark1.port 
-var addresses = new Array[InetSocketAddress](2);
-
-addresses(0) = new InetSocketAddress("localhost",4949)
+//flume-spark.conf (archivo de configuracion flume)
+#create agent name a1
+a1.sources = source1
+a1.channels = channel1
+a1.sinks = sink1
 
 
-//Create a Flume Polling Stream which will poll the Sink the get the events 
-//from sinks every 2 seconds. 
-//Last 2 parameters of this method are important as the 
-//1.maxBatchSize = It is the maximum number of events to be pulled from the Spark sink 
-//in a single RPC call.
-//2.parallelism  - The Number of concurrent requests this stream should send to the sink.
-val flumeStream = FlumeUtils.createPollingStream(streamCtx,addresses,StorageLevel.MEMORY_AND_DISK_SER_2,1000,1)
+#configures source a1
+a1.sources.source1.type = exec
+a1.sources.source1.command = tail -F /opt/gen_logs/logs/access.log
+a1.sources.source1.channels = channel1
 
- //Define Output Stream Connected to Console for printing the results
-val outputStream = new ObjectOutputStream(Console.out)
-
-def printValues(stream:DStream[SparkFlumeEvent],streamCtx: StreamingContext, outputStream: ObjectOutput){
-    stream.foreachRDD(foreachFunc)
-    //SparkFlumeEvent is the wrapper classes containing all the events captured by the Stream
-    def foreachFunc = (rdd: RDD[SparkFlumeEvent]) => {
-      val array = rdd.collect()
-      println("---------Start Printing Results----------")
-      println("Total size of Events= " +array.size)
-      for(flumeEvent<-array){
-        //This is to get the AvroFlumeEvent from SparkFlumeEvent 
-        //for printing the Original Data
-        val payLoad = flumeEvent.event.getBody()
-        //Printing the actual events captured by the Stream
-        println(new String(payLoad.array()))
-      }
-      println("---------Finished Printing Results----------")
-    }
-  }
+#define a channel 
+a1.channels.channel1.type = memory
+a1.channels.channel1.capacity = 2000
 
 
-//Invoking custom Print Method for writing Events to Console
-printValues(flumeStream,streamCtx, outputStream)
+#define sink utilizando avro
+a1.sinks.sink1.type = avro
+a1.sinks.sink1.hostname = 10.0.2.15
+a1.sinks.sink1.port = 4951
+a1.sinks.sink1.channel = channel1
 
-//Most important statement which will initiate the Streaming Context
-streamCtx.start();
-//Wait till the execution is completed.
-streamCtx.awaitTermination();
+///////////////////////////
 
 
 import org.apache.spark.SparkConf
@@ -102,10 +61,41 @@ def printValues(stream:DStream[SparkFlumeEvent],streamCtx: StreamingContext, out
   }
 
 
-//Invoking custom Print Method for writing Events to Console
-printValues(stream,streamCtx, outputStream)
+//Most important statement which will initiate the Streaming Context
+streamCtx.start();
+//Wait till the execution is completed.
+streamCtx.awaitTermination();
+
 
 streamCtx.start()
+
+////////////////////////
+//flume-spark.conf (archivo de configuracion flume)
+//utilizando org.apache.spark.streaming.flume.sink.SparkSink
+//descargar los archivos de la siguente pagina http://spark.apache.org/docs/latest/streaming-flume-integration.html
+
+#create agent name a1
+a1.sources = source1
+a1.channels = channel1
+a1.sinks = sink1
+
+
+#configures source a1
+a1.sources.source1.type = netcat
+a1.sources.source1.bind = 10.0.2.15
+a1.sources.source1.port = 4949
+a1.sources.source1.channels = channel1
+
+#define a channel 
+a1.channels.channel1.type = memory
+a1.channels.channel1.capacity = 2000
+
+
+#define sink
+a1.sinks.sink1.type = org.apache.spark.streaming.flume.sink.SparkSink
+a1.sinks.sink1.hostname = 10.0.2.15
+a1.sinks.sink1.port = 4951
+a1.sinks.sink1.channel = channel1
 
 
 
