@@ -81,6 +81,8 @@ stream.count().map(cnt => "Received " + cnt + " flume events." ).print()
 
 stream.map(e => new String(e.event.getBody.array() ) ).print()
 
+stream.map(event => "Eventheader : header " +event.event.get(0).toString + " body " + new String(event.event.getBody.array)).print
+
 streamCtx.start()
 
 
