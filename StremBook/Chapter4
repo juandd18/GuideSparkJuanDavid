@@ -72,6 +72,7 @@ val streamCtx = new StreamingContext(sc, Seconds(3))
 
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
 
+val listado = stream.map(x => new String(x.event.getBody().array()))
 
 //print the values of the Dstream
 def printLogvalues(stream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
@@ -99,29 +100,24 @@ def printLogvalues(stream: DStream[SparkFlumeEvent],streamCtx: StreamingContext)
   stream.foreachRDD(foreachFunc)
 }
 
-//filter only log with method get
-def printFilterGet(stream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
-
-  def foreachFunc = (rdd: RDD[SparkFlumeEvent]) => {
-  val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
-  val array = rdd.map(flumeEvent => new String(flumeEvent.event.getBody().array())).collect()
-  println("----------- start printing results ----------")
-  println("-------- " + array )
-  println("----------- finishing printing results ----------")
-  }
-  
-  //use foreach function
-  stream.foreachRDD(foreachFunc)
-}
 
 def executeTransformation(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
   //print values
   //printLogvalues(dStream,streamCtx)
-  printFilterGet(dStream,streamCtx)
 }
 
+def executeTransformation2(dStream: DStream[String],streamCtx: StreamingContext){
+  println("----------- start printing results ----------")
+  val valores = dStream.map(x => x.split(' '))
+  for(valor <- valores){
+    print(valor)
+  }
+  println("----------- finishing printing results ----------")
+}
+ 
 
-executeTransformation(stream,streamCtx)
+//executeTransformation(stream,streamCtx)
+executeTransformation2(listado,streamCtx)
 
 streamCtx.start()
 
