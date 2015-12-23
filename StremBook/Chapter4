@@ -24,6 +24,32 @@ a1.sinks.sink1.port = 4951
 a1.sinks.sink1.channel = channel1
 
 
+///////////////////// create class serializable for run 
+//in a flat map
+
+case class ApacheAccessLog2(ipAddress: String, clientIdentd: String,
+                           userId: String, dateTime: String, method: String,
+                           endpoint: String, protocol: String,
+                           responseCode: Int, contentSize: Long) extends Serializable {
+
+}
+
+object ApacheAccessLog extends Serializable {
+  val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
+
+  def parseLogLine(log: String): ApacheAccessLog2 = {
+    val res = PATTERN.findFirstMatchIn(log)
+    if (res.isEmpty) {
+      throw new RuntimeException("Cannot parse log line: " + log)
+    }
+    val m = res.get
+    //ApacheAccessLog2(m.group(1), m.group(2), m.group(3), m.group(4),m.group(5), m.group(6), m.group(7), m.group(8).toInt, m.group(9).toLong)
+    return  m.group(1)
+  }
+}
+
+/////////////////////
+
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.flume._
@@ -35,53 +61,36 @@ import java.io.ObjectOutputStream
 import java.io.ObjectOutput
 import java.io.ByteArrayOutputStream
 
-import java.util.regex.Pattern
-import java.util.regex.Matcher
+case class ApacheAccessLog(ipAddress: String, clientIdentd: String,
+                           userId: String, dateTime: String, method: String,
+                           endpoint: String, protocol: String,
+                           responseCode: Int, contentSize: Long) extends Serializable {
 
- def createMap(matcher:Matcher) :Map[String,String] = {
-    return Map[String,String](
-      ("IP" -> matcher.group(1)),
-      ("client" -> matcher.group(2)),
-      ("user" -> matcher.group(3)),
-      ("date" -> matcher.group(4)),
-      ("method" -> matcher.group(5)),
-      ("request" -> matcher.group(6)),
-      ("protocol" -> matcher.group(7)),
-      ("respCode" -> matcher.group(8)),
-      ("size" -> matcher.group(9))
-      )
-    }
- 
-//create method which uses regex to read a text streaming
-def transformLogData(Logline: String) : Map[String,String] = {
-    //pattern which extract the revelant data from log files
-    val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)""";
-    val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
-    val matcher = PATTERN.matcher(Logline);
-    
-    //when a line of string does not belong to the pattern
-    if(!matcher.find()){
-      println("Cannot parse logline "+ Logline); 
-    }
-    
-    createMap(matcher)
-    
- }
+}
  
 val streamCtx = new StreamingContext(sc, Seconds(3))
 
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
 
-val newDstream = stream.flatMap{ x => transformLogData(new String(x.event.getBody().array() ))}
 
 //print the values of the Dstream
-def printLogvalues(stream: DStream[(String,String)],streamCtx: StreamingContext){
-  
-  def foreachFunc = (rdd: RDD[(String,String)]) => {
-  val array = rdd.take(2)
+def printLogvalues(stream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
+
+  def foreachFunc = (rdd: RDD[SparkFlumeEvent]) => {
+  val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
+  val array = rdd.collect()
   println("----------- start printing results ----------")
-  for(dataMap <- array.array){
-    print(dataMap._1,"-----",dataMap._2)
+  for(flumeEvent <- array.array){
+    
+    val payLoad = flumeEvent.event.getBody()
+    val logline = new String(payLoad.array())
+    val res = PATTERN.findFirstMatchIn(logline)
+    if (res.isEmpty) {
+      println("Cannot parse log line: " + logline)
+    }
+    val m = res.get
+    
+    print("ID "  m.group(1)," date ",m.group(2))
   }
   println("----------- finishing printing results ----------")
   }
@@ -90,14 +99,29 @@ def printLogvalues(stream: DStream[(String,String)],streamCtx: StreamingContext)
   stream.foreachRDD(foreachFunc)
 }
 
-def executeTransformation(dStream: DStream[(String,String)],streamCtx: StreamingContext){
+//filter only log with method get
+def printFilterGet(stream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
+
+  def foreachFunc = (rdd: RDD[SparkFlumeEvent]) => {
+  val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
+  val array = rdd.map(flumeEvent => new String(flumeEvent.event.getBody().array())).collect()
+  println("----------- start printing results ----------")
+  println("-------- " + array )
+  println("----------- finishing printing results ----------")
+  }
   
+  //use foreach function
+  stream.foreachRDD(foreachFunc)
+}
+
+def executeTransformation(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
   //print values
-  printLogvalues(dStream,streamCtx)
+  //printLogvalues(dStream,streamCtx)
+  printFilterGet(dStream,streamCtx)
 }
 
 
-executeTransformation(newDstream,streamCtx)
+executeTransformation(stream,streamCtx)
 
 streamCtx.start()
 
