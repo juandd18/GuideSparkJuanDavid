@@ -38,12 +38,12 @@ case class ApacheAccessLog2(ipAddress: String, clientIdentd: String,
 }
 
 object ApacheAccessLog extends Serializable {
-  val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
-
+  //val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
+  val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)""";
   def parseLogLine(log: String): ApacheAccessLog2 = {
     
     val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
-    val m = PATTERN.matcher(log);
+    @transient val m = PATTERN.matcher(log);
     
     if (!m.find()) {
     System.out.println("Cannot parse logline" + log);
@@ -54,6 +54,38 @@ object ApacheAccessLog extends Serializable {
   }
 }
 
+import java.util.regex.Pattern
+import java.util.regex.Matcher
+
+class ScalaLogAnalyzer extends Serializable{
+
+def createDataMap(m:Matcher):Map[String,String] = {
+  return Map[String, String](
+  ("IP" -> m.group(1)),
+  ("client" -> m.group(2)),
+  ("user" -> m.group(3)),
+  ("date" -> m.group(4)),
+  ("method" -> m.group(5)),
+  ("request" -> m.group(6)),
+  ("protocol" -> m.group(7)),
+  ("respCode" -> m.group(8)),
+  ("size" -> m.group(9))
+  )}
+
+def tansfromLogData(logLine: String):Map[String,String] = {
+  //Pattern which will extract the relevant data from Apache Access Log Files
+  val LOG_ENTRY_PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\S+)""";
+  val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
+  @transient val matcher = PATTERN.matcher(logLine);
+  //Matching the pattern for the each line of the Apache access Log file
+  if (!matcher.find()) {
+    System.out.println("Cannot parse logline" + logLine);
+  }
+  //Finally create a Key/Value pair of extracted data and return to calling program
+  createDataMap(matcher);
+}
+
+}
 /////////////////////
 
 import org.apache.spark.SparkConf
@@ -67,15 +99,54 @@ import java.io.ObjectOutputStream
 import java.io.ObjectOutput
 import java.io.ByteArrayOutputStream
 
+import com.juan.ApacheAccessLog._
 
  
 val streamCtx = new StreamingContext(sc, Seconds(3))
 
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
 
-val newDstream = stream.flatMap { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+val newDstream = stream.flatMap { x => parseFromLogLine(new String(x.event.getBody().array())) }
 
-val listado = stream.map(x => new String(x.event.getBody().array()))
+
+newDstream.foreachRDD(accessLogs => {
+      if (accessLogs.count() == 0) {
+        println("No access com.databricks.app.logs received in this time interval")
+      } else {
+        accessLogs.toDF().registerTempTable("com/databricks/app/logs")
+
+        // Calculate statistics based on the content size.
+        val contentSizeStats = sqlContext
+          .sql("SELECT SUM(contentSize), COUNT(*), MIN(contentSize), MAX(contentSize) FROM com.databricks.app.logs")
+          .first()
+        println("Content Size Avg: %s, Min: %s, Max: %s".format(
+          contentSizeStats.getLong(0) / contentSizeStats.getLong(1),
+          contentSizeStats(2),
+          contentSizeStats(3)))
+
+        // Compute Response Code to Count.
+        val responseCodeToCount = sqlContext
+          .sql("SELECT responseCode, COUNT(*) FROM com.databricks.app.logs GROUP BY responseCode")
+          .map(row => (row.getInt(0), row.getLong(1)))
+          .take(1000)
+        println(s"""Response code counts: ${responseCodeToCount.mkString("[", ",", "]")}""")
+
+        // Any IPAddress that has accessed the server more than 10 times.
+        val ipAddresses =sqlContext
+          .sql("SELECT ipAddress, COUNT(*) AS total FROM com.databricks.app.logs GROUP BY ipAddress HAVING total > 10")
+          .map(row => row.getString(0))
+          .take(100)
+        println(s"""IPAddresses > 10 times: ${ipAddresses.mkString("[", ",", "]")}""")
+
+        val topEndpoints = sqlContext
+          .sql("SELECT endpoint, COUNT(*) AS total FROM com.databricks.app.logs GROUP BY endpoint ORDER BY total DESC LIMIT 10")
+          .map(row => (row.getString(0), row.getLong(1)))
+          .collect()
+        println(s"""Top Endpoints: ${topEndpoints.mkString("[", ",", "]")}""")
+      }
+    })
+
+
 
 //print the values of the Dstream
 def printLogvalues(stream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
