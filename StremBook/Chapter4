@@ -27,6 +27,9 @@ a1.sinks.sink1.channel = channel1
 ///////////////////// create class serializable for run 
 //in a flat map
 
+import java.util.regex.Pattern
+import java.util.regex.Matcher
+
 case class ApacheAccessLog2(ipAddress: String, clientIdentd: String,
                            userId: String, dateTime: String, method: String,
                            endpoint: String, protocol: String,
@@ -38,13 +41,16 @@ object ApacheAccessLog extends Serializable {
   val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
 
   def parseLogLine(log: String): ApacheAccessLog2 = {
-    val res = PATTERN.findFirstMatchIn(log)
-    if (res.isEmpty) {
-      throw new RuntimeException("Cannot parse log line: " + log)
+    
+    val PATTERN = Pattern.compile(LOG_ENTRY_PATTERN);
+    val m = PATTERN.matcher(log);
+    
+    if (!m.find()) {
+    System.out.println("Cannot parse logline" + log);
     }
-    val m = res.get
-    //ApacheAccessLog2(m.group(1), m.group(2), m.group(3), m.group(4),m.group(5), m.group(6), m.group(7), m.group(8).toInt, m.group(9).toLong)
-    return  m.group(1)
+    
+    ApacheAccessLog2(m.group(1), m.group(2), m.group(3), m.group(4),m.group(5), m.group(6), m.group(7), m.group(8).toInt, m.group(9).toLong)
+    //return  m.group(1)
   }
 }
 
@@ -61,16 +67,13 @@ import java.io.ObjectOutputStream
 import java.io.ObjectOutput
 import java.io.ByteArrayOutputStream
 
-case class ApacheAccessLog(ipAddress: String, clientIdentd: String,
-                           userId: String, dateTime: String, method: String,
-                           endpoint: String, protocol: String,
-                           responseCode: Int, contentSize: Long) extends Serializable {
 
-}
  
 val streamCtx = new StreamingContext(sc, Seconds(3))
 
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
+
+val newDstream = stream.flatMap { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
 
 val listado = stream.map(x => new String(x.event.getBody().array()))
 
