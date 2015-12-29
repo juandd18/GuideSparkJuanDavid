@@ -101,48 +101,40 @@ import java.io.ByteArrayOutputStream
 
 import com.juan.ApacheAccessLog._
 
- 
-val streamCtx = new StreamingContext(sc, Seconds(3))
+import com.databricks.apps.logs.ApacheAccessLog
+import org.apache.spark.sql.SQLContext
+
+val sqlContext = new SQLContext(sc)
+import sqlContext.implicits._
+
+val streamCtx = new StreamingContext(sc, Seconds(5))
 
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
 
-val newDstream = stream.flatMap { x => parseFromLogLine(new String(x.event.getBody().array())) }
+val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
 
 
 newDstream.foreachRDD(accessLogs => {
       if (accessLogs.count() == 0) {
+        println("----------- NO ACCESS printing results ----------")
         println("No access com.databricks.app.logs received in this time interval")
+        println("----------- start printing results ----------")
       } else {
-        accessLogs.toDF().registerTempTable("com/databricks/app/logs")
+        accessLogs.toDF().registerTempTable("logs")
 
         // Calculate statistics based on the content size.
         val contentSizeStats = sqlContext
-          .sql("SELECT SUM(contentSize), COUNT(*), MIN(contentSize), MAX(contentSize) FROM com.databricks.app.logs")
+          .sql("SELECT SUM(contentSize), COUNT(*), MIN(contentSize), MAX(contentSize) FROM logs")
           .first()
+        
+        println("----------- start printing results ----------")
         println("Content Size Avg: %s, Min: %s, Max: %s".format(
           contentSizeStats.getLong(0) / contentSizeStats.getLong(1),
           contentSizeStats(2),
           contentSizeStats(3)))
+        println("----------- finishing printing results ----------")
 
-        // Compute Response Code to Count.
-        val responseCodeToCount = sqlContext
-          .sql("SELECT responseCode, COUNT(*) FROM com.databricks.app.logs GROUP BY responseCode")
-          .map(row => (row.getInt(0), row.getLong(1)))
-          .take(1000)
-        println(s"""Response code counts: ${responseCodeToCount.mkString("[", ",", "]")}""")
-
-        // Any IPAddress that has accessed the server more than 10 times.
-        val ipAddresses =sqlContext
-          .sql("SELECT ipAddress, COUNT(*) AS total FROM com.databricks.app.logs GROUP BY ipAddress HAVING total > 10")
-          .map(row => row.getString(0))
-          .take(100)
-        println(s"""IPAddresses > 10 times: ${ipAddresses.mkString("[", ",", "]")}""")
-
-        val topEndpoints = sqlContext
-          .sql("SELECT endpoint, COUNT(*) AS total FROM com.databricks.app.logs GROUP BY endpoint ORDER BY total DESC LIMIT 10")
-          .map(row => (row.getString(0), row.getLong(1)))
-          .collect()
-        println(s"""Top Endpoints: ${topEndpoints.mkString("[", ",", "]")}""")
+        
       }
     })
 
