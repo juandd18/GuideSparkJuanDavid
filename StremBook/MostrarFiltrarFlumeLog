@@ -1,1 +1,151 @@
-//creacion
+
+//flume file 
+#create agent name a1
+a1.sources = source1
+a1.channels = channel1
+a1.sinks = sink1
+
+
+#configures source a1
+a1.sources.source1.type = netcat
+a1.sources.source1.bind = 10.0.2.15
+a1.sources.source1.port = 4949
+a1.sources.source1.channels = channel1
+
+#define a channel 
+a1.channels.channel1.type = memory
+a1.channels.channel1.capacity = 2000
+
+
+#define sink
+a1.sinks.sink1.type = org.apache.spark.streaming.flume.sink.SparkSink
+a1.sinks.sink1.hostname = 10.0.2.15
+a1.sinks.sink1.port = 4951
+a1.sinks.sink1.channel = channel1
+
+
+///////////////////// create scala object in eclipse luna (which allows create scala object and projects) 
+//for read the apache acces log
+
+package com.juanScala
+
+case class ApacheAccessLog(ipAddress: String, clientIdentd: String,
+                           userId: String, dateTime: String, method: String,
+                           endpoint: String, protocol: String,
+                           responseCode: Int, contentSize: Long) {
+
+}
+
+object ApacheAccessLog {
+  val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+)""".r
+
+  def parseLogLine(log: String): ApacheAccessLog = {
+    val res = PATTERN.findFirstMatchIn(log)
+    if (res.isEmpty) {
+      throw new RuntimeException("Cannot parse log line: " + log)
+    }
+    val m = res.get
+    ApacheAccessLog(m.group(1), m.group(2), m.group(3), m.group(4),
+      m.group(5), m.group(6), m.group(7), m.group(8).toInt, m.group(9).toLong)
+  }
+}
+
+///////////////
+//spark shell sentence
+spark-shell --master spark://quickstart.cloudera:7077 --jars /home/cloudera/Documents/ReadAccessLogScala.jar,/home/cloudera/Documents/spark-logs-analyzer_2.10-1.0.jar
+
+/////////////////////
+
+import org.apache.spark.SparkConf
+import org.apache.spark.streaming._
+import org.apache.spark.streaming.flume._
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.rdd._
+import org.apache.spark.streaming.dstream._
+import java.net.InetSocketAddress
+import java.io.ObjectOutputStream
+import java.io.ObjectOutput
+import java.io.ByteArrayOutputStream
+
+//es el jar ReadAccessLogScala.jar
+import com.juanScala.ApacheAccessLog 
+
+
+//import com.databricks.apps.logs.ApacheAccessLog es otra clase que hace lo mismo
+// es el jar spark-logs-analyzer_2.10-1.0.jar
+
+import org.apache.spark.sql.SQLContext
+
+//para utilizar DataFrames
+val sqlContext = new SQLContext(sc)
+import sqlContext.implicits._
+
+val streamCtx = new StreamingContext(sc, Seconds(5))
+
+val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
+
+//muestra los datos que recibe del flumeStream
+def executeMostrarDatos(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
+  
+  val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+  
+  newDstream.foreachRDD(accessLogs => {
+      if (accessLogs.count() == 0) {
+        println("----------- NO ACCESS printing results ----------")
+        println("No access com.databricks.app.logs received in this time interval")
+        println("----------- NO ACCESS printing results ----------")
+      } else {
+        accessLogs.toDF().registerTempTable("logs")
+
+        // mostrar todos los datos.
+        
+        println("----------- start printing results ----------")
+        val contentSizeStats = sqlContext
+          .sql("SELECT ipAddress, clientIdentd, userId, dateTime,method,endpoint,protocol,responseCode,contentSize FROM logs")
+        contentSizeStats.map{dato => "ipAdrress: " + dato(0) + " clientIdent: " + dato(1) + 
+            " userId: " + dato(2) + " dateTime: " + dato(3)+ " method: " + dato(4) + " endpoint: " + dato(5) +
+            " protocol: " +dato(6) + " responseCode: " + dato(6) + " contentSize: " + dato(7)   }.collect().foreach(println)
+          
+        println("----------- finishing printing results ----------")
+        
+      }
+    })
+
+}
+
+//filtra a solo los log stream que tengan el metodo GET
+def executeFiltrarDatos(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
+  
+  val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+  
+  newDstream.foreachRDD(accessLogs => {
+      if (accessLogs.count() == 0) {
+        println("----------- NO ACCESS printing results ----------")
+        println("No access com.databricks.app.logs received in this time interval")
+        println("----------- NO ACCESS printing results ----------")
+      } else {
+        accessLogs.toDF().registerTempTable("logs")
+
+        println("----------- start printing FILTER results ----------")
+        val contentSizeStats = sqlContext
+          .sql("SELECT ipAddress, clientIdentd, userId, dateTime,method,endpoint,protocol,responseCode,contentSize FROM logs WHERE method = 'GET'  ")
+        contentSizeStats.map{dato => "ipAdrress: " + dato(0) + " clientIdent: " + dato(1) + 
+            " userId: " + dato(2) + " dateTime: " + dato(3)+ " method: " + dato(4) + " endpoint: " + dato(5) +
+            " protocol: " +dato(6) + " responseCode: " + dato(6) + " contentSize: " + dato(7)   }.collect().foreach(println)
+          
+        println("----------- finishing printing FILTER results ----------")
+        
+      }
+    })
+
+}
+
+
+//primer punto mostar los datos
+executeMostrarDatos(stream,streamCtx)
+
+executeFiltrarDatos(stream,streamCtx)
+
+
+
+streamCtx.start()
