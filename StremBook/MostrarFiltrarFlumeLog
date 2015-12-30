@@ -140,12 +140,37 @@ def executeFiltrarDatos(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingCo
 
 }
 
+//filtra a solo los log stream que tengan el metodo GET
+def executeGroupByDatos(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
+  
+  val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+  
+  newDstream.foreachRDD(accessLogs => {
+      if (accessLogs.count() == 0) {
+        println("----------- NO ACCESS printing results ----------")
+        println("No access com.databricks.app.logs received in this time interval")
+        println("----------- NO ACCESS printing results ----------")
+      } else {
+        accessLogs.toDF().registerTempTable("logs")
+
+        println("----------- start printing GROUP results ----------")
+        val contentSizeStats = sqlContext
+          .sql("SELECT ipAddress, COUNT(*) FROM logs GROUP BY ipAddress  ")
+        contentSizeStats.map{dato => "ipAdrress: " + dato(0) + " Cuantos: " + dato(1)  }.collect().foreach(println)
+          
+        println("----------- finishing printing GROUP results ----------")
+        
+      }
+    })
+
+}
 
 //primer punto mostar los datos
 executeMostrarDatos(stream,streamCtx)
-
+//filtra los datos
 executeFiltrarDatos(stream,streamCtx)
-
+//cuantos veces una ip llega (usando group by)
+executeGroupByDatos(stream,streamCtx)
 
 
 streamCtx.start()
