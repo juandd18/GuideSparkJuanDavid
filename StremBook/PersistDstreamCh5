@@ -30,7 +30,7 @@ import org.apache.spark.sql.SQLContext
 val sqlContext = new SQLContext(sc)
 import sqlContext.implicits._
 
-val streamCtx = new StreamingContext(sc, Seconds(5))
+val streamCtx = new StreamingContext(sc, Seconds(10))
 
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
 
@@ -39,6 +39,13 @@ val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, Storag
 def persistsDstreams(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
   
   val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+  
+  if (newDstream.count() == 0) {
+        println("----------- NO ACCESS printing results ----------")
+        println("No access data")
+        println("----------- NO ACCESS printing results ----------")
+      }
+  
   
   //Writing Data as Text Files on Local File system
   // the method requares two input prefix and suffix
