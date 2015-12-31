@@ -17,6 +17,7 @@ import java.io.ObjectOutputStream
 import java.io.ObjectOutput
 import java.io.ByteArrayOutputStream
 
+
 //es el jar ReadAccessLogScala.jar
 import com.juanScala.ApacheAccessLog 
 
@@ -35,27 +36,46 @@ val streamCtx = new StreamingContext(sc, Seconds(10))
 val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
 
 
+val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+
+
 //persist the Dstream en varias destinos
-def persistsDstreams(dStream: DStream[SparkFlumeEvent],streamCtx: StreamingContext){
-  
-  val newDstream = stream.map { x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
-  
-  if (newDstream.count() == 0) {
+def persistsDstreams(dStream: DStream[com.juanScala.ApacheAccessLog],streamCtx: StreamingContext){
+  newDstream.foreachRDD(accessLogs => {
+      if (accessLogs.count() == 0) {
         println("----------- NO ACCESS printing results ----------")
-        println("No access data")
+        println("No access com.databricks.app.logs received in this time interval")
         println("----------- NO ACCESS printing results ----------")
+      } else {
+        accessLogs.toDF().registerTempTable("logs")
+
+        // mostrar todos los datos.
+        
+        println("----------- start printing results ----------")
+        val contentSizeStats = sqlContext
+          .sql("SELECT ipAddress, clientIdentd, userId, dateTime,method,endpoint,protocol,responseCode,contentSize FROM logs")
+        contentSizeStats.map{dato => "ipAdrress: " + dato(0) + " clientIdent: " + dato(1) + 
+            " userId: " + dato(2) + " dateTime: " + dato(3)+ " method: " + dato(4) + " endpoint: " + dato(5) +
+            " protocol: " +dato(6) + " responseCode: " + dato(6) + " contentSize: " + dato(7)   }.collect().foreach(println)
+          
+        println("----------- finishing printing results ----------")
+        
       }
-  
-  
+    })
   //Writing Data as Text Files on Local File system
   // the method requares two input prefix and suffix
   // the final format is "<prefix><Milliseconds><suffix>"
-  newDstream.saveAsTextFiles("/home/cloudera/Documents/outputDir/data-", "")
+  newDstream.saveAsTextFiles("/user/cloudera/streaming/textfiles/data-", "")
+  
+  //Defining saveAsObject for saving data in form of Hadoop Sequence Files
+  newDstream.saveAsObjectFiles("/user/cloudera/streaming/sequenceFiles/data-")
+  println("----------- FINAL ACCESS printing results ----------")
+  
 }
 
-
 //
-persistsDstreams(stream,streamCtx)
+persistsDstreams(newDstream,streamCtx)
+
 
 
 streamCtx.start()
