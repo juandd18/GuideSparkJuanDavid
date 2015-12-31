@@ -65,10 +65,11 @@ def persistsDstreams(dStream: DStream[com.juanScala.ApacheAccessLog],streamCtx: 
   //Writing Data as Text Files on Local File system
   // the method requares two input prefix and suffix
   // the final format is "<prefix><Milliseconds><suffix>"
-  newDstream.saveAsTextFiles("/user/cloudera/streaming/textfiles/data-", "")
+  //newDstream.saveAsTextFiles("/user/cloudera/streaming/textfiles/data-", "")
   
   //Defining saveAsObject for saving data in form of Hadoop Sequence Files
-  newDstream.saveAsObjectFiles("/user/cloudera/streaming/sequenceFiles/data-")
+  //newDstream.saveAsObjectFiles("/user/cloudera/streaming/sequenceFiles/data-")
+  
   println("----------- FINAL ACCESS printing results ----------")
   
 }
