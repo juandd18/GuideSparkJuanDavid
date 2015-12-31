@@ -1,0 +1,52 @@
+
+import org.apache.spark.SparkConf
+import org.apache.spark.streaming._
+import org.apache.spark.streaming.flume._
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.rdd._
+import org.apache.spark.streaming.dstream._
+import org.apache.spark.streaming.Duration
+import java.net.InetSocketAddress
+import java.io.ObjectOutputStream
+import java.io.ObjectOutput
+import java.io.ByteArrayOutputStream
+
+
+//es el jar ReadAccessLogScala.jar
+import com.juanMap.ApacheAccessLog 
+
+
+val streamCtx = new StreamingContext(sc, Seconds(10))
+
+val stream = FlumeUtils.createPollingStream(streamCtx, "10.0.2.15", 4951, StorageLevel.MEMORY_ONLY_SER_2)
+
+//ojo es flatMap para que funcione en hadoop api porque es key,value
+val newDstream = stream.flatMap{ x => ApacheAccessLog.parseLogLine(new String(x.event.getBody().array())) }
+
+
+//persist the Dstream 
+def persistsDstreams(dStream: DStream[(String, String)],streamCtx: StreamingContext){
+  
+  dStream.foreachRDD{ rdd =>
+  val array = rdd.collect()
+  println("---------Start Printing Results----------")
+    for(dataMap<-array.array){
+        print(dataMap._1,"-----",dataMap._2)
+    }
+  }
+  
+  //Writing Data as Text Files on Local File system
+  // the method requares two input prefix and suffix
+  // the final format is "<prefix><Milliseconds><suffix>"
+  //newDstream.saveAsHadoopFiles("/user/cloudera/streaming/sequenceFiles/data-","")
+  
+  println("----------- FINAL ACCESS printing results ----------")
+  
+}
+
+//
+persistsDstreams(newDstream,streamCtx)
+
+
+
+streamCtx.start()
